@@ -1,0 +1,253 @@
+{
+  "schema_version": "1.0",
+  "metadata": {
+    "fields": [
+      {
+        "name": "reporting_unit_id",
+        "type": "string",
+        "required": true,
+        "description": "Mã định danh đơn vị hành chính cấp xã/phường (theo mã Tổng cục Thống kê GSO)"
+      },
+      {
+        "name": "reporting_unit_name",
+        "type": "string",
+        "required": true,
+        "description": "Tên UBND phường/xã báo cáo"
+      },
+      {
+        "name": "district_name",
+        "type": "string",
+        "required": true,
+        "description": "Tên Quận/Huyện/Thị xã chủ quản"
+      },
+      {
+        "name": "province_name",
+        "type": "string",
+        "required": true,
+        "description": "Tên Tỉnh/Thành phố trực thuộc Trung ương"
+      },
+      {
+        "name": "report_period",
+        "type": "string",
+        "required": true,
+        "enum": ["weekly", "monthly", "quarterly", "yearly", "thematic"],
+        "description": "Kỳ báo cáo (Tuần, Tháng, Quý, Năm, Chuyên đề)"
+      },
+      {
+        "name": "report_time",
+        "type": "string",
+        "required": true,
+        "description": "Mốc thời gian cụ thể của báo cáo (Ví dụ: Tháng 7/2026, Quý II/2026)"
+      },
+      {
+        "name": "start_date",
+        "type": "date",
+        "required": true,
+        "description": "Ngày bắt đầu chốt số liệu"
+      },
+      {
+        "name": "end_date",
+        "type": "date",
+        "required": true,
+        "description": "Ngày kết thúc chốt số liệu"
+      },
+      {
+        "name": "created_date",
+        "type": "date",
+        "required": false,
+        "description": "Ngày lập văn bản báo cáo"
+      },
+      {
+        "name": "document_number",
+        "type": "string",
+        "required": false,
+        "description": "Số và ký hiệu văn bản báo cáo"
+      },
+      {
+        "name": "approver_role",
+        "type": "string",
+        "required": false,
+        "description": "Chức danh người ký duyệt (Chủ tịch/Phó Chủ tịch)"
+      },
+      {
+        "name": "approver_name",
+        "type": "string",
+        "required": false,
+        "description": "Họ và tên người ký duyệt"
+      }
+    ]
+  },
+  "sections": {
+    "dan_cu": {
+      "display_name": "Dân cư",
+      "fields": [
+        {
+          "name": "tong_dan_so",
+          "type": "integer",
+          "description": "Tổng số dân cư trú thực tế trên địa bàn",
+          "aliases": ["Dân số toàn phường", "Tổng số dân", "Số nhân khẩu", "Tổng số người"]
+        },
+        {
+          "name": "so_ho_khau",
+          "type": "integer",
+          "description": "Tổng số hộ gia đình trên địa bàn",
+          "aliases": ["Tổng số hộ", "Số hộ gia đình", "Số hộ dân"]
+        },
+        {
+          "name": "so_khai_sinh",
+          "type": "integer",
+          "description": "Tổng số trường hợp đăng ký khai sinh trong kỳ",
+          "aliases": ["Đăng ký khai sinh", "Số trường hợp khai sinh", "Số trẻ khai sinh"]
+        },
+        {
+          "name": "so_khai_sinh_dung_han",
+          "type": "integer",
+          "description": "Số trường hợp đăng ký khai sinh đúng thời hạn",
+          "aliases": ["Khai sinh đúng hạn", "Đăng ký khai sinh đúng hạn"]
+        },
+        {
+          "name": "so_khai_tu",
+          "type": "integer",
+          "description": "Tổng số trường hợp đăng ký khai tử trong kỳ",
+          "aliases": ["Đăng ký khai tử", "Số trường hợp tử vong", "Khai tử"]
+        },
+        {
+          "name": "so_khai_tu_dung_han",
+          "type": "integer",
+          "description": "Số trường hợp đăng ký khai tử đúng thời hạn",
+          "aliases": ["Khai tử đúng hạn", "Đăng ký khai tử đúng hạn"]
+        },
+        {
+          "name": "so_ket_hon",
+          "type": "integer",
+          "description": "Số cặp đôi đăng ký kết hôn",
+          "aliases": ["Đăng ký kết hôn", "Số trường hợp kết hôn", "Số cặp kết hôn"]
+        },
+        {
+          "name": "so_tamtru_moi",
+          "type": "integer",
+          "description": "Số lượng công dân đăng ký tạm trú mới trong kỳ",
+          "aliases": ["Đăng ký tạm trú", "Tạm trú mới", "Nhân khẩu tạm trú mới"]
+        },
+        {
+          "name": "so_tamvang_moi",
+          "type": "integer",
+          "description": "Số lượng công dân khai báo tạm vắng mới trong kỳ",
+          "aliases": ["Đăng ký tạm vắng", "Tạm vắng mới", "Khai báo tạm vắng"]
+        }
+      ]
+    },
+    "khieu_nai_to_cao": {
+      "display_name": "Khiếu nại - Tố cáo",
+      "fields": [
+        {
+          "name": "so_luot_tiep_dan",
+          "type": "integer",
+          "description": "Số lượt tiếp công dân tại Trụ sở tiếp dân của phường",
+          "aliases": ["Tiếp công dân", "Số lượt tiếp dân", "Số lượt tiếp công dân"]
+        },
+        {
+          "name": "so_doan_dong_nguoi",
+          "type": "integer",
+          "description": "Số lượng các đoàn đông người khiếu nại, tố cáo",
+          "aliases": ["Đoàn đông người", "Số đoàn đông người"]
+        },
+        {
+          "name": "tong_so_don",
+          "type": "integer",
+          "description": "Tổng số đơn khiếu nại, tố cáo, kiến nghị, phản ánh tiếp nhận",
+          "aliases": ["Tổng số đơn tiếp nhận", "Số lượng đơn thư", "Tổng số đơn", "Đơn thư tiếp nhận"]
+        },
+        {
+          "name": "don_thuoc_tham_quyen",
+          "type": "integer",
+          "description": "Số đơn thuộc thẩm quyền giải quyết của UBND phường",
+          "aliases": ["Đơn thuộc thẩm quyền", "Thuộc thẩm quyền giải quyết"]
+        },
+        {
+          "name": "don_khieu_nai",
+          "type": "integer",
+          "description": "Số lượng đơn khiếu nại",
+          "aliases": ["Đơn khiếu nại", "Khiếu nại"]
+        },
+        {
+          "name": "don_to_cao",
+          "type": "integer",
+          "description": "Số lượng đơn tố cáo",
+          "aliases": ["Đơn tố cáo", "Tố cáo"]
+        },
+        {
+          "name": "don_kien_nghi_phan_anh",
+          "type": "integer",
+          "description": "Số lượng đơn kiến nghị, phản ánh",
+          "aliases": ["Đơn kiến nghị, phản ánh", "Kiến nghị phản ánh", "Đơn phản ánh, kiến nghị"]
+        },
+        {
+          "name": "don_da_giai_quyet",
+          "type": "integer",
+          "description": "Số lượng đơn đã giải quyết xong và ban hành kết luận/quyết định",
+          "aliases": ["Đơn đã giải quyết", "Kết quả giải quyết", "Đã giải quyết xong"]
+        },
+        {
+          "name": "don_dang_giai_quyet",
+          "type": "integer",
+          "description": "Số lượng đơn đang trong thời hạn xem xét giải quyết",
+          "aliases": ["Đang giải quyết", "Đơn đang giải quyết", "Trong thời hạn giải quyết"]
+        },
+        {
+          "name": "don_qua_han_chua_giai_quyet",
+          "type": "integer",
+          "description": "Số lượng đơn quá thời hạn luật định nhưng chưa giải quyết xong",
+          "aliases": ["Đơn tồn đọng", "Quá hạn giải quyết", "Đơn quá hạn"]
+        }
+      ]
+    },
+    "chi_tieu_nhiem_vu": {
+      "display_name": "Chỉ tiêu thực hiện nhiệm vụ",
+      "fields": [
+        {
+          "name": "tong_ho_so_tiep_nhan",
+          "type": "integer",
+          "description": "Tổng số hồ sơ yêu cầu giải quyết thủ tục hành chính tiếp nhận",
+          "aliases": ["Tổng hồ sơ nhận", "Hồ sơ tiếp nhận", "Tổng số hồ sơ tiếp nhận"]
+        },
+        {
+          "name": "ho_so_da_giai_quyet",
+          "type": "integer",
+          "description": "Số hồ sơ thủ tục hành chính đã giải quyết và trả kết quả",
+          "aliases": ["Hồ sơ đã giải quyết", "Đã giải quyết và trả kết quả", "Kết quả giải quyết TTHC"]
+        },
+        {
+          "name": "ho_so_dung_han",
+          "type": "integer",
+          "description": "Số lượng hồ sơ hành chính được giải quyết đúng hoặc trước hạn",
+          "aliases": ["Hồ sơ đúng hạn", "Giải quyết đúng hạn và trước hạn", "Hồ sơ trước và đúng hạn"]
+        },
+        {
+          "name": "ho_so_qua_han",
+          "type": "integer",
+          "description": "Số lượng hồ sơ hành chính giải quyết quá hạn quy định",
+          "aliases": ["Hồ sơ quá hạn", "Giải quyết quá hạn"]
+        },
+        {
+          "name": "ho_so_dang_giai_quyet",
+          "type": "integer",
+          "description": "Số lượng hồ sơ hành chính đang trong quá trình xử lý",
+          "aliases": ["Hồ sơ đang giải quyết", "Đang xử lý"]
+        },
+        {
+          "name": "ty_le_dung_han",
+          "type": "float",
+          "description": "Tỷ lệ phần trăm hồ sơ giải quyết đúng hạn so với tổng hồ sơ đã giải quyết",
+          "aliases": ["Tỷ lệ giải quyết đúng hạn", "Tỷ lệ hồ sơ đúng hạn", "Hiệu suất đúng hạn"]
+        },
+        {
+          "name": "diem_cai_cach_hanh_chinh",
+          "type": "float",
+          "description": "Điểm số cải cách hành chính (PAR INDEX) của phường",
+          "aliases": ["Điểm cải cách hành chính", "Điểm PAR INDEX", "Chỉ số cải cách hành chính"]
+        }
+      ]
+    }
+  }
+}
