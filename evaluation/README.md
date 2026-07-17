@@ -4,9 +4,9 @@
 
 ## Giới thiệu
 
-Evaluation Pipeline được sử dụng để đánh giá chất lượng của AI Assistant trong việc **tự động tổng hợp, chuẩn hóa số liệu và sinh báo cáo quản trị cho UBND phường**.
+Evaluation Pipeline được sử dụng để đánh giá chất lượng của **Agentic AI** trong việc **tự động tổng hợp, chuẩn hóa số liệu và sinh báo cáo quản trị cho UBND phường**.
 
-Dự án **không sử dụng Fine-tuning**. Mục tiêu của Evaluation là đo lường chất lượng đầu ra và cải thiện **Data Pipeline**, **Knowledge Base (RAG)**, **Prompt** và **Rule Engine**.
+Dự án **không sử dụng Fine-tuning**. Mục tiêu của Evaluation là đo lường chất lượng đầu ra và cải thiện **Data Pipeline**, **Knowledge Base (RAG)**, **Prompt**, **Memory** và **Rule Engine**.
 
 ---
 
@@ -93,11 +93,9 @@ So sánh từng chỉ tiêu trong báo cáo AI với Ground Truth.
 
 Ví dụ:
 
-- Dân số
-- Thu ngân sách
-- Hộ nghèo
-- Hồ sơ khiếu nại
-- KPI hoàn thành
+- Dân số (Tổng dân số, Tạm trú, Tạm vắng)
+- Hồ sơ khiếu nại - tố cáo (Đơn tiếp nhận, Trạng thái giải quyết)
+- KPI hoàn thành (Tỷ lệ giải quyết hồ sơ thủ tục hành chính đúng hạn)
 
 ---
 
