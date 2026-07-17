@@ -1,0 +1,41 @@
+{
+  "schema_version": "1.0",
+  "rules": [
+    {
+      "id": "RULE_DEMO_01",
+      "description": "Số khai sinh đúng hạn không được lớn hơn tổng số khai sinh",
+      "formula": "so_khai_sinh_dung_han <= so_khai_sinh",
+      "severity": "error"
+    },
+    {
+      "id": "RULE_DEMO_02",
+      "description": "Số khai tử đúng hạn không được lớn hơn tổng số khai tử",
+      "formula": "so_khai_tu_dung_han <= so_khai_tu",
+      "severity": "error"
+    },
+    {
+      "id": "RULE_KNTC_01",
+      "description": "Tổng số đơn tiếp nhận phải bằng tổng các loại đơn phân loại theo tính chất (khiếu nại + tố cáo + kiến nghị phản ánh)",
+      "formula": "tong_so_don == don_khieu_nai + don_to_cao + don_kien_nghi_phan_anh",
+      "severity": "warning"
+    },
+    {
+      "id": "RULE_KNTC_02",
+      "description": "Tổng số đơn đã giải quyết, đang giải quyết và quá hạn chưa giải quyết phải bằng tổng số đơn thuộc thẩm quyền",
+      "formula": "don_thuoc_tham_quyen == don_da_giai_quyet + don_dang_giai_quyet + don_qua_han_chua_giai_quyet",
+      "severity": "error"
+    },
+    {
+      "id": "RULE_TTHC_01",
+      "description": "Tỷ lệ giải quyết đúng hạn phải bằng (ho_so_dung_han / ho_so_da_giai_quyet) * 100",
+      "formula": "abs(ty_le_dung_han - (ho_so_dung_han / ho_so_da_giai_quyet) * 100) < 0.1",
+      "severity": "warning"
+    },
+    {
+      "id": "RULE_TTHC_02",
+      "description": "Tổng số hồ sơ tiếp nhận bằng đã giải quyết cộng đang giải quyết",
+      "formula": "tong_ho_so_tiep_nhan == ho_so_da_giai_quyet + ho_so_dang_giai_quyet",
+      "severity": "warning"
+    }
+  ]
+}
