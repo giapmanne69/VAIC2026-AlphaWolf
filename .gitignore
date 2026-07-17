@@ -1,0 +1,12 @@
+# IDE collaboration logs
+.gemini/
+
+# Python virtual environment and cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+venv/
+.venv/
+.env
+.env.local
