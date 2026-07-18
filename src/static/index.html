@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VAIC AI Report Agent - Trợ lý tổng hợp báo cáo hành chính</title>
+    <!-- Nhúng Google Fonts Outfit & Be Vietnam Pro để hỗ trợ font chữ lớn, rõ nét -->
+    <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['"Be Vietnam Pro"', '"Outfit"', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <style>
+        /* Tùy chỉnh thanh cuộn log */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 8px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #1e1b4b;
+            border-radius: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #4f46e5;
+            border-radius: 6px;
+        }
+        /* Hiệu ứng Glassmorphism */
+        .glass-panel {
+            background: rgba(30, 41, 59, 0.7);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 font-sans min-h-screen flex flex-col antialiased">
+
+    <!-- HEADER CHÍNH -->
+    <header class="border-b border-slate-800 bg-slate-900/80 backdrop-blur-md sticky top-0 z-50 px-6 py-4 flex items-center justify-between">
+        <div class="flex items-center space-x-3">
+            <div class="bg-indigo-600 p-2.5 rounded-xl shadow-lg shadow-indigo-500/20 text-white">
+                <i data-lucide="shield-alert" class="w-6 h-6"></i>
+            </div>
+            <div>
+                <h1 class="text-xl font-bold tracking-tight text-white">VAIC AI Report Agent</h1>
+                <p class="text-xs text-indigo-400 font-medium">Hệ thống Trợ lý Tác tử AI Phân tích & Tự động điền báo cáo</p>
+            </div>
+        </div>
+        <div class="flex items-center space-x-4">
+            <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                Hệ thống Kết nối Sẵn sàng
+            </span>
+        </div>
+    </header>
+
+    <!-- CONTAINER CHÍNH -->
+    <div class="flex-1 grid grid-cols-1 lg:grid-cols-4 gap-6 p-6 max-w-7xl mx-auto w-full">
+        
+        <!-- CỘT CẤU HÌNH TRÁI (SIDEBAR) -->
+        <aside class="lg:col-span-1 flex flex-col space-y-5">
+            <div class="glass-panel rounded-2xl p-5 shadow-xl">
+                <h2 class="text-lg font-bold text-white mb-4 flex items-center gap-2 border-b border-slate-700 pb-2">
+                    <i data-lucide="settings-2" class="w-5 h-5 text-indigo-400"></i>
+                    Cấu hình mô hình AI
+                </h2>
+                
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-semibold text-slate-300 mb-1.5">Mô hình Lập luận chính:</label>
+                        <div class="relative">
+                            <select id="llm-model" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500 appearance-none">
+                                <option value="Llama-3.3-70B-Instruct" selected>Llama-3.3-70B (FPT Factory)</option>
+                            </select>
+                            <i data-lucide="chevron-down" class="w-4 h-4 text-slate-400 absolute right-3 top-3 pointer-events-none"></i>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-semibold text-slate-300 mb-1.5">Mô hình Vision (Ảnh/Scan):</label>
+                        <div class="relative">
+                            <select id="vision-model" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500 appearance-none">
+                                <option value="Qwen2.5-VL-7B-Instruct" selected>Qwen2.5-VL-7B</option>
+                            </select>
+                            <i data-lucide="chevron-down" class="w-4 h-4 text-slate-400 absolute right-3 top-3 pointer-events-none"></i>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-semibold text-slate-300 mb-1.5">FPT AI API Key:</label>
+                        <input id="api-key" type="password" placeholder="Nhập khóa API nếu có..." 
+                            class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-indigo-500">
+                        <p class="text-[11px] text-slate-400 mt-1">Hệ thống sẽ tự động sử dụng khóa API cấu hình sẵn nếu bỏ trống.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- HƯỚNG DẪN DÀNH CHO CÁN BỘ -->
+            <div class="glass-panel rounded-2xl p-5 shadow-xl bg-indigo-950/20 border-indigo-500/10">
+                <h3 class="text-sm font-bold text-indigo-400 mb-2.5 flex items-center gap-1.5">
+                    <i data-lucide="help-circle" class="w-4 h-4"></i>
+                    Hướng dẫn nhanh
+                </h3>
+                <ul class="space-y-2 text-xs text-slate-300 list-decimal pl-4">
+                    <li>Nạp tệp tin biểu mẫu trống (.docx) ở Bước 1.</li>
+                    <li>Nạp một hoặc nhiều tệp báo cáo thô của phòng ban.</li>
+                    <li>Bấm nút "Khởi chạy" ở Bước 2 và quan sát AI tư duy.</li>
+                    <li>Duyệt lại số liệu/nhận xét và bấm "Tải về" ở Bước 3.</li>
+                </ul>
+            </div>
+        </aside>
+
+        <!-- KHOANG LÀM VIỆC CHÍNH (WORKSPACE - 3 BƯỚC) -->
+        <main class="lg:col-span-3 flex flex-col space-y-6">
+            
+            <!-- BƯỚC 1: NẠP FILE -->
+            <section class="glass-panel rounded-2xl p-6 shadow-xl">
+                <h2 class="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                    <span class="flex items-center justify-center bg-indigo-600/30 text-indigo-400 w-7 h-7 rounded-lg text-sm font-bold">1</span>
+                    Bước 1: Tải lên Biểu mẫu & Báo cáo thô phòng ban
+                </h2>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <!-- UPLOAD BIỂU MẪU TRỐNG -->
+                    <div class="border-2 border-dashed border-slate-700 hover:border-indigo-500 transition-colors rounded-2xl p-5 flex flex-col items-center justify-center text-center cursor-pointer relative bg-slate-900/50">
+                        <input id="template-file" type="file" accept=".docx" class="absolute inset-0 opacity-0 cursor-pointer">
+                        <div id="template-icon" class="bg-indigo-600/10 text-indigo-400 p-3 rounded-xl mb-3">
+                            <i data-lucide="file-text" class="w-6 h-6"></i>
+                        </div>
+                        <h3 id="template-label" class="text-sm font-bold text-slate-200">Biểu mẫu báo cáo trống (.docx)</h3>
+                        <p id="template-sublabel" class="text-xs text-slate-400 mt-1">Kéo thả tệp hoặc bấm để chọn tệp tin</p>
+                    </div>
+
+                    <!-- UPLOAD BÁO CÁO THÔ -->
+                    <div class="border-2 border-dashed border-slate-700 hover:border-indigo-500 transition-colors rounded-2xl p-5 flex flex-col items-center justify-center text-center cursor-pointer relative bg-slate-900/50">
+                        <input id="raw-files" type="file" multiple accept=".docx,.xlsx,.pdf,.png,.jpg,.jpeg" class="absolute inset-0 opacity-0 cursor-pointer">
+                        <div id="raw-icon" class="bg-indigo-600/10 text-indigo-400 p-3 rounded-xl mb-3">
+                            <i data-lucide="files" class="w-6 h-6"></i>
+                        </div>
+                        <h3 id="raw-label" class="text-sm font-bold text-slate-200">Tài liệu thô phòng ban (Nhiều tệp)</h3>
+                        <p id="raw-sublabel" class="text-xs text-slate-400 mt-1">Hỗ trợ Excel, Word, PDF, Ảnh báo cáo...</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- BƯỚC 2: AI PHÂN TÍCH & KỂM TRA -->
+            <section class="glass-panel rounded-2xl p-6 shadow-xl">
+                <h2 class="text-lg font-bold text-white mb-4 flex items-center justify-between">
+                    <span class="flex items-center gap-2">
+                        <span class="flex items-center justify-center bg-indigo-600/30 text-indigo-400 w-7 h-7 rounded-lg text-sm font-bold">2</span>
+                        Bước 2: AI tự động phân tích & Kiểm lỗi logic chéo
+                    </span>
+                    <button id="run-btn" class="bg-indigo-600 hover:bg-indigo-700 transition-all font-bold text-sm px-6 py-2.5 rounded-xl shadow-lg shadow-indigo-600/25 inline-flex items-center gap-2">
+                        <i data-lucide="play" class="w-4 h-4"></i>
+                        Khởi chạy Tác tử AI
+                    </button>
+                </h2>
+
+                <!-- KHUNG SUY NGHĨ CỦA TÁC TỬ (REACT STREAM) -->
+                <div class="bg-slate-950 rounded-xl border border-slate-800 p-4">
+                    <div class="flex items-center justify-between text-xs text-slate-400 border-b border-slate-800 pb-2 mb-3">
+                        <span class="font-semibold flex items-center gap-1.5">
+                            <i data-lucide="terminal" class="w-4 h-4 text-indigo-400"></i>
+                            Nhật ký tư duy của Tác tử AI (ReAct Loop)
+                        </span>
+                        <span id="agent-status" class="text-slate-500">Chờ lệnh khởi chạy...</span>
+                    </div>
+
+                    <div id="log-console" class="h-64 overflow-y-auto custom-scrollbar font-mono text-xs space-y-3 pr-2">
+                        <!-- Logs tư duy sẽ hiển thị động tại đây -->
+                        <div class="text-slate-500 italic">Vui lòng tải lên tệp tin và bấm nút "Khởi chạy Tác tử AI" để bắt đầu quy trình làm việc...</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- BƯỚC 3: HIỆU CHỈNH & TẢI VỀ -->
+            <section id="step-3-section" class="glass-panel rounded-2xl p-6 shadow-xl opacity-60 pointer-events-none transition-all duration-300">
+                <h2 class="text-lg font-bold text-white mb-5 flex items-center justify-between">
+                    <span class="flex items-center gap-2">
+                        <span class="flex items-center justify-center bg-indigo-600/30 text-indigo-400 w-7 h-7 rounded-lg text-sm font-bold">3</span>
+                        Bước 3: Hiệu chỉnh số liệu & Tải báo cáo Word hoàn chỉnh
+                    </span>
+                    <button id="download-btn" class="bg-emerald-600 hover:bg-emerald-700 transition-all font-bold text-sm px-6 py-2.5 rounded-xl shadow-lg shadow-emerald-600/25 inline-flex items-center gap-2">
+                        <i data-lucide="download" class="w-4 h-4"></i>
+                        Tải báo cáo Word (.docx)
+                    </button>
+                </h2>
+
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                    <!-- DANH SÁCH SỐ LIỆU ĐÃ TRÍCH XUẤT -->
+                    <div class="bg-slate-900/50 border border-slate-800 rounded-xl p-4 flex flex-col">
+                        <h3 class="text-sm font-bold text-indigo-400 mb-3 flex items-center gap-1.5">
+                            <i data-lucide="table" class="w-4 h-4"></i>
+                            Số liệu trích xuất chỉ tiêu báo cáo
+                        </h3>
+                        <div id="kpi-form" class="space-y-3 max-h-80 overflow-y-auto custom-scrollbar pr-1 flex-1">
+                            <p class="text-xs text-slate-500 italic">Chưa có số liệu trích xuất...</p>
+                        </div>
+                    </div>
+
+                    <!-- NHẬN XÉT CỦA AI -->
+                    <div class="bg-slate-900/50 border border-slate-800 rounded-xl p-4 flex flex-col">
+                        <h3 class="text-sm font-bold text-indigo-400 mb-3 flex items-center gap-1.5">
+                            <i data-lucide="edit-3" class="w-4 h-4"></i>
+                            Đoạn văn nhận xét đánh giá (Cán bộ có thể chỉnh sửa)
+                        </h3>
+                        <textarea id="remarks-area" rows="12" class="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 font-sans custom-scrollbar flex-1 resize-none" placeholder="Đoạn văn nhận định của AI sẽ hiển thị ở đây..."></textarea>
+                    </div>
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+    <!-- FOOTER -->
+    <footer class="border-t border-slate-900 bg-slate-950 py-4 text-center text-xs text-slate-500">
+        © 2026 Ủy ban nhân dân cấp phường. Thiết kế giao diện di trú thông suốt - Production Ready.
+    </footer>
+
+    <!-- LOGIC JAVASCRIPT GIAO DIỆN -->
+    <script>
+        // Khởi tạo icons Lucide
+        lucide.createIcons();
+
+        // Khai báo các đối tượng UI
+        const templateInput = document.getElementById("template-file");
+        const templateLabel = document.getElementById("template-label");
+        const templateSublabel = document.getElementById("template-sublabel");
+        const templateIcon = document.getElementById("template-icon");
+
+        const rawInput = document.getElementById("raw-files");
+        const rawLabel = document.getElementById("raw-label");
+        const rawSublabel = document.getElementById("raw-sublabel");
+        const rawIcon = document.getElementById("raw-icon");
+
+        const runBtn = document.getElementById("run-btn");
+        const downloadBtn = document.getElementById("download-btn");
+        const logConsole = document.getElementById("log-console");
+        const agentStatus = document.getElementById("agent-status");
+
+        const step3Section = document.getElementById("step-3-section");
+        const kpiForm = document.getElementById("kpi-form");
+        const remarksArea = document.getElementById("remarks-area");
+
+        // Biến lưu trữ Session
+        let currentSessionId = "";
+        let currentKpis = {};
+
+        // Xử lý hiển thị khi chọn tệp biểu mẫu
+        templateInput.addEventListener("change", (e) => {
+            if (e.target.files.length > 0) {
+                const name = e.target.files[0].name;
+                templateLabel.innerText = "Đã chọn biểu mẫu:";
+                templateSublabel.innerText = name;
+                templateSublabel.className = "text-xs text-emerald-400 font-semibold mt-1";
+                templateIcon.className = "bg-emerald-500/10 text-emerald-400 p-3 rounded-xl mb-3";
+            }
+        });
+
+        // Xử lý hiển thị khi chọn tệp thô
+        rawInput.addEventListener("change", (e) => {
+            if (e.target.files.length > 0) {
+                const count = e.target.files.length;
+                rawLabel.innerText = `Đã chọn ${count} tệp tin thô:`;
+                rawSublabel.innerText = Array.from(e.target.files).map(f => f.name).join(", ");
+                rawSublabel.className = "text-xs text-emerald-400 font-semibold mt-1 truncate max-w-xs";
+                rawIcon.className = "bg-emerald-500/10 text-emerald-400 p-3 rounded-xl mb-3";
+            }
+        });
+
+        // Hàm ghi log vào Console ảo
+        function writeLog(message, type = "info") {
+            const div = document.createElement("div");
+            div.className = "py-1 border-b border-slate-900/50 last:border-0";
+            
+            let badge = "";
+            let textClass = "text-slate-300";
+            
+            if (type === "thought") {
+                badge = `<span class="bg-indigo-500/15 text-indigo-400 border border-indigo-500/20 px-1.5 py-0.5 rounded text-[10px] uppercase font-bold mr-1.5">Tác tử lập luận</span>`;
+                textClass = "text-indigo-200 italic font-semibold";
+            } else if (type === "action") {
+                badge = `<span class="bg-amber-500/15 text-amber-400 border border-amber-500/20 px-1.5 py-0.5 rounded text-[10px] uppercase font-bold mr-1.5">Gọi công cụ</span>`;
+                textClass = "text-amber-200 font-bold";
+            } else if (type === "observation") {
+                badge = `<span class="bg-emerald-500/15 text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 rounded text-[10px] uppercase font-bold mr-1.5">Kết quả quan sát</span>`;
+                textClass = "text-slate-400 text-[11px]";
+            } else if (type === "error") {
+                badge = `<span class="bg-rose-500/15 text-rose-400 border border-rose-500/20 px-1.5 py-0.5 rounded text-[10px] uppercase font-bold mr-1.5">Lỗi hệ thống</span>`;
+                textClass = "text-rose-400 font-bold";
+            } else if (type === "complete") {
+                badge = `<span class="bg-emerald-500 text-slate-950 px-1.5 py-0.5 rounded text-[10px] uppercase font-bold mr-1.5">Hoàn thành</span>`;
+                textClass = "text-emerald-400 font-bold";
+            }
+
+            div.innerHTML = `${badge} <span class="${textClass}">${message}</span>`;
+            logConsole.appendChild(div);
+            logConsole.scrollTop = logConsole.scrollHeight;
+        }
+
+        // Tải danh sách thói quen cũ khi khởi chạy
+        async function fetchStylePreferences() {
+            try {
+                const res = await axios.get("/api/agent/style");
+                if (res.data.preferences) {
+                    console.log("Đã tải thói quen văn phong.");
+                }
+            } catch (e) {
+                console.error("Không tải được thói quen văn phong:", e);
+            }
+        }
+        fetchStylePreferences();
+
+        // Khởi chạy Agentic Loop qua Server-Sent Events (SSE)
+        runBtn.addEventListener("click", async () => {
+            if (templateInput.files.length === 0) {
+                alert("Vui lòng tải lên tệp Biểu mẫu báo cáo trống (.docx) ở Bước 1!");
+                return;
+            }
+            if (rawInput.files.length === 0) {
+                alert("Vui lòng tải lên ít nhất một tệp Báo cáo thô ở Bước 1!");
+                return;
+            }
+
+            // Reset UI
+            logConsole.innerHTML = "";
+            kpiForm.innerHTML = '<p class="text-xs text-slate-500 italic">Đang phân tích số liệu...</p>';
+            remarksArea.value = "";
+            step3Section.className = "glass-panel rounded-2xl p-6 shadow-xl opacity-60 pointer-events-none transition-all duration-300";
+            runBtn.disabled = true;
+            runBtn.className = "bg-slate-800 text-slate-500 font-bold text-sm px-6 py-2.5 rounded-xl cursor-not-allowed inline-flex items-center gap-2";
+            agentStatus.innerText = "🤖 Đang hoạt động...";
+            agentStatus.className = "text-indigo-400 animate-pulse font-semibold";
+
+            writeLog("Khởi tạo tiến trình và nạp tệp tin lên máy chủ...", "info");
+
+            const formData = new FormData();
+            formData.append("template", templateInput.files[0]);
+            Array.from(rawInput.files).forEach(f => {
+                formData.append("raws", f);
+            });
+            
+            const apiKey = document.getElementById("api-key").value.trim ? document.getElementById("api-key").value.trim() : document.getElementById("api-key").value;
+            if (apiKey) {
+                formData.append("fpt_api_key", apiKey);
+            }
+
+            try {
+                // Sử dụng fetch để đọc stream Server-Sent Events (SSE)
+                const response = await fetch("/api/agent/run", {
+                    method: "POST",
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Mã lỗi HTTP: ${response.status}`);
+                }
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder("utf-8");
+                let buffer = "";
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split("\n\n");
+                    // Giữ lại phần chưa hoàn thành ở cuối buffer
+                    buffer = lines.pop();
+
+                    for (const line of lines) {
+                        if (line.startsWith("data: ")) {
+                            const rawJson = line.slice(6);
+                            try {
+                                const data = JSON.parse(rawJson);
+                                handleAgentEvent(data);
+                            } catch (e) {
+                                console.error("Lỗi parse SSE JSON:", e);
+                            }
+                        }
+                    }
+                }
+            } catch (e) {
+                writeLog(`Gặp sự cố lỗi nghiêm trọng: ${e.message}`, "error");
+                agentStatus.innerText = "❌ Lỗi hệ thống";
+                agentStatus.className = "text-rose-400 font-semibold";
+                runBtn.disabled = false;
+                runBtn.className = "bg-indigo-600 hover:bg-indigo-700 transition-all font-bold text-sm px-6 py-2.5 rounded-xl shadow-lg shadow-indigo-600/25 inline-flex items-center gap-2";
+            }
+        });
+
+        // Hàm điều phối sự kiện trả về từ Tác tử AI
+        function handleAgentEvent(data) {
+            if (data.status === "init") {
+                currentSessionId = data.session_id;
+                writeLog(`Tạo Session ID thành công: ${currentSessionId}`, "info");
+            } 
+            else if (data.status === "running") {
+                if (data.thought) {
+                    writeLog(data.thought, "thought");
+                }
+                if (data.action && data.action !== "Không rõ") {
+                    // Bình dân hóa tên công cụ trên màn hình log
+                    let toolNameVN = data.action;
+                    if (data.action === "extract_schema_tool") toolNameVN = "Quét cấu trúc biểu mẫu";
+                    if (data.action === "read_and_clean_raw_tool") toolNameVN = "Bảo mật & làm sạch tệp thô";
+                    if (data.action === "extract_kpis_tool") toolNameVN = "Trích xuất chỉ số số liệu";
+                    if (data.action === "validate_and_correct_tool") toolNameVN = "Dò lỗi tính toán & kiểm chéo";
+                    if (data.action === "generate_section_remarks_tool") toolNameVN = "Viết nhận xét báo cáo";
+                    if (data.action === "render_docx_report_tool") toolNameVN = "Kết xuất báo cáo";
+                    
+                    writeLog(`${toolNameVN} (${JSON.stringify(data.action_input)})`, "action");
+                }
+                if (data.observation) {
+                    writeLog(data.observation, "observation");
+                }
+            } 
+            else if (data.status === "completed") {
+                writeLog("Báo cáo đã tổng hợp xong! Sẵn sàng duyệt và tải xuống.", "complete");
+                agentStatus.innerText = "✅ Hoàn thành";
+                agentStatus.className = "text-emerald-400 font-semibold";
+                
+                runBtn.disabled = false;
+                runBtn.className = "bg-indigo-600 hover:bg-indigo-700 transition-all font-bold text-sm px-6 py-2.5 rounded-xl shadow-lg shadow-indigo-600/25 inline-flex items-center gap-2";
+                
+                // Mở khóa Bước 3
+                step3Section.className = "glass-panel rounded-2xl p-6 shadow-xl transition-all duration-300";
+                
+                // Trích xuất KPI và nhận xét từ state
+                const ans = data.final_answer;
+                if (ans && ans.kpi_data) {
+                    currentKpis = ans.kpi_data;
+                    renderKpiForm(currentKpis);
+                }
+                if (ans && ans.combined_remarks) {
+                    remarksArea.value = ans.combined_remarks;
+                }
+            }
+            else if (data.status === "error") {
+                writeLog(data.message, "error");
+                agentStatus.innerText = "❌ Lỗi thực thi";
+                agentStatus.className = "text-rose-400 font-semibold";
+                runBtn.disabled = false;
+                runBtn.className = "bg-indigo-600 hover:bg-indigo-700 transition-all font-bold text-sm px-6 py-2.5 rounded-xl shadow-lg shadow-indigo-600/25 inline-flex items-center gap-2";
+            }
+        }
+
+        // Tạo form động hiển thị số liệu chỉ tiêu để chỉnh sửa
+        function renderKpiForm(kpis) {
+            kpiForm.innerHTML = "";
+            if (Object.keys(kpis).length === 0) {
+                kpiForm.innerHTML = '<p class="text-xs text-slate-500 italic">Không tìm thấy chỉ số số liệu...</p>';
+                return;
+            }
+
+            for (const [key, value] of Object.entries(kpis)) {
+                const div = document.createElement("div");
+                div.className = "flex items-center justify-between gap-4 p-2 bg-slate-950/40 rounded-lg border border-slate-800/60";
+                
+                // Nhãn chỉ tiêu đã được Việt hóa rõ ràng
+                let friendlyName = key;
+                if (key.includes("tong_thu_ngan_sach")) friendlyName = "Thu ngân sách nhà nước";
+                if (key.includes("tong_chi_ngan_sach")) friendlyName = "Chi ngân sách địa phương";
+                if (key.includes("dang_ky_khai_sinh")) friendlyName = "Hồ sơ khai sinh";
+                if (key.includes("dang_ky_khai_tu")) friendlyName = "Hồ sơ khai tử";
+                if (key.includes("tam_tru_moi")) friendlyName = "Hồ sơ tạm trú mới";
+                if (key.includes("chung_thuc_chu_ky")) friendlyName = "Hồ sơ chứng thực chữ ký";
+                if (key.includes("vi_pham_an_ninh_trat_tu")) friendlyName = "Số vụ vi phạm ANTT";
+
+                // Phân biệt kỳ trước và kỳ báo cáo để nhãn trực quan
+                if (key.endsWith("_ky_truoc")) {
+                    friendlyName += " (Kỳ trước)";
+                } else if (key.endsWith("_ky_bao_cao")) {
+                    friendlyName += " (Kỳ báo cáo)";
+                }
+
+                div.innerHTML = `
+                    <label class="text-xs font-semibold text-slate-300 w-2/3 truncate" title="${key}">${friendlyName}</label>
+                    <input type="text" data-key="${key}" value="${value !== null ? value : ''}" 
+                        class="kpi-input w-1/3 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-right text-xs text-slate-100 focus:outline-none focus:border-indigo-500">
+                `;
+                kpiForm.appendChild(div);
+            }
+        }
+
+        // Tải báo cáo Word (.docx) cuối cùng (Human-in-the-loop)
+        downloadBtn.addEventListener("click", async () => {
+            if (!currentSessionId) {
+                alert("Không tìm thấy session làm việc hợp lệ. Vui lòng chạy lại Bước 2.");
+                return;
+            }
+
+            // Ghi nhận dữ liệu mới nhất từ các input chỉ tiêu
+            const updatedKpis = {};
+            const inputElements = document.querySelectorAll(".kpi-input");
+            inputElements.forEach(input => {
+                const key = input.getAttribute("data-key");
+                const val = input.value;
+                // Cố gắng chuyển về số nếu có thể
+                if (val === "") {
+                    updatedKpis[key] = null;
+                } else if (!isNaN(val)) {
+                    updatedKpis[key] = Number(val);
+                } else {
+                    updatedKpis[key] = val;
+                }
+            });
+
+            const remarks = remarksArea.value;
+
+            // Đổi trạng thái nút bấm
+            downloadBtn.disabled = true;
+            downloadBtn.innerText = "Đang điền biểu mẫu...";
+            downloadBtn.className = "bg-slate-800 text-slate-500 font-bold text-sm px-6 py-2.5 rounded-xl cursor-not-allowed inline-flex items-center gap-2";
+
+            try {
+                const res = await axios.post("/api/agent/render-docx", {
+                    session_id: currentSessionId,
+                    kpi_data: updatedKpis,
+                    remarks: remarks
+                }, {
+                    responseType: 'blob'  // Yêu cầu nhận file blob nhị phân
+                });
+
+                // Tạo URL tạm thời để kích hoạt tải xuống tệp nhị phân
+                const url = window.URL.createObjectURL(new Blob([res.data]));
+                const link = document.createElement('a');
+                link.href = url;
+                link.setAttribute('download', `Bao_cao_tong_hop_${currentSessionId.slice(0,8)}.docx`);
+                document.body.appendChild(link);
+                link.click();
+                link.remove();
+                
+                // Ghi nhận thói quen văn phong của nhận xét vừa được duyệt
+                // (Chỉ lấy 100 ký tự đầu làm thói quen phong cách mẫu)
+                if (remarks.trim()) {
+                    const formData = new FormData();
+                    formData.append("key", "phong_cach_nhan_xet");
+                    formData.append("val", remarks.slice(0, 150));
+                    await axios.post("/api/agent/style", formData);
+                }
+
+                writeLog("Báo cáo Word đã được xuất và tải xuống thành công!", "complete");
+            } catch (e) {
+                console.error("Lỗi khi kết xuất báo cáo:", e);
+                alert("Có lỗi xảy ra khi sinh tệp báo cáo Word.");
+            } finally {
+                downloadBtn.disabled = false;
+                downloadBtn.innerText = "Tải báo cáo Word (.docx)";
+                downloadBtn.className = "bg-emerald-600 hover:bg-emerald-700 transition-all font-bold text-sm px-6 py-2.5 rounded-xl shadow-lg shadow-emerald-600/25 inline-flex items-center gap-2";
+            }
+        });
+    </script>
+</body>
+</html>

@@ -220,7 +220,7 @@ Hệ thống được cấu hình tối ưu để sử dụng các mô hình và
 - **Mô hình xếp hạng lại (Reranker Model):** `bge-reranker-v2-m3` - tối ưu hóa kết quả tìm kiếm ngữ cảnh luật chính xác nhất.
 - **Cơ sở dữ liệu Vector (Vector Database):** `FAISS` (Local CPU-based, gọn nhẹ và miễn phí) - lưu trữ chỉ mục tri thức luật RAG.
 - **Xử lý tài liệu:** `python-docx` / `docxtpl` (Word template injection), `openpyxl` (Excel parser), `pdfplumber` (PDF parser), `pytesseract` (OCR).
-- **Giao diện người dùng (Frontend & Backend):** `Streamlit` (Chạy local/máy chủ Windows nội bộ của phường, giao diện trực quan).
+- Giao diện người dùng (Frontend & Backend): `React` + `Vite` + `TailwindCSS` (Giao diện thân thiện cán bộ trung niên) phối hợp cùng `FastAPI` Backend (Python API & Stream tư duy ReAct).
 
 ---
 
@@ -274,7 +274,8 @@ VAIC_Project/
 │
 ├── src/                        # Mã nguồn cốt lõi (Core Code của Agent)
 │   ├── __init__.py
-│   ├── agent.py                # Lớp Agent điều phối chính (Reasoning & Action Loop)
+│   ├── agent.py                # Lớp Agent điều phối chính (ReAct Loop & Tool Registry)
+│   ├── server.py               # FastAPI Backend (RESTful APIs & SSE Event Stream)
 │   ├── hooks/                  # Các Hook bảo mật biên (Security Guardrails)
 │   │   ├── anonymizer.py       # Hook ẩn danh PII (CCC/SĐT/Tên công dân)
 │   │   └── redaction.py        # Hook kiểm soát tài liệu thuộc danh mục Mật
@@ -287,9 +288,13 @@ VAIC_Project/
 │       ├── short_term.py       # Bộ nhớ ngữ cảnh phiên làm việc hiện tại
 │       └── long_term.py        # Bộ nhớ thói quen viết & các phản hồi cũ của cán bộ
 │
-├── app/                        # Giao diện người dùng cho Cán bộ & Lãnh đạo
-│   ├── app.py                  # Dashboard ứng dụng web (bằng Streamlit / FastAPI)
+├── app/                        # Giao diện người dùng Streamlit (Legacy/Tương thích ngược)
+│   ├── app.py                  # Dashboard ứng dụng web Streamlit
 │   └── assets/                 # Custom CSS, Logo giao diện
+│
+├── frontend/                   # [NEW] Giao diện người dùng React (Vite + TailwindCSS + Lucide Icons)
+│   ├── src/                    # Mã nguồn React components & pages
+│   └── package.json            # Cấu hình dependencies frontend
 │
 ├── evaluation/                 # Bộ kiểm thử tự động của hệ thống
 │   ├── test_dataset/           # Ca kiểm thử (Dữ liệu thô + Báo cáo Ground Truth chuẩn)
