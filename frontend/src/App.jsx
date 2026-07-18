@@ -1,20 +1,19 @@
 import React, { useState, useEffect, useRef } from 'react'
 import axios from 'axios'
 import { 
-  ShieldAlert, 
-  Settings2, 
-  HelpCircle, 
   FileText, 
   Files, 
   Play, 
-  Terminal, 
   Download, 
-  Table, 
-  Edit3, 
+  Check, 
   Loader2,
-  CheckCircle,
-  AlertTriangle,
-  ChevronDown
+  ChevronDown,
+  Settings,
+  HelpCircle,
+  ClipboardCheck,
+  ChevronRight,
+  Upload,
+  AlertCircle
 } from 'lucide-react'
 
 function App() {
@@ -26,7 +25,7 @@ function App() {
   const [visionModel, setVisionModel] = useState('Qwen2.5-VL-7B-Instruct')
   
   const [isRunning, setIsRunning] = useState(false)
-  const [agentStatusText, setAgentStatusText] = useState('Chờ lệnh khởi chạy...')
+  const [agentStatusText, setAgentStatusText] = useState('Sẵn sàng xử lý')
   const [agentStatusType, setAgentStatusType] = useState('idle') // idle, running, success, error
   const [logs, setLogs] = useState([])
   
@@ -36,15 +35,30 @@ function App() {
   const [isCompleted, setIsCompleted] = useState(false)
   
   const [isDownloading, setIsDownloading] = useState(false)
+  const [isConfigOpen, setIsConfigOpen] = useState(false)
   
   const consoleRef = useRef(null)
+  const configRef = useRef(null)
 
-  // Tự động cuộn console xuống khi có log mới
+  // Auto-scroll console
   useEffect(() => {
     if (consoleRef.current) {
       consoleRef.current.scrollTop = consoleRef.current.scrollHeight
     }
   }, [logs])
+
+  // Close popover when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (configRef.current && !configRef.current.contains(event.target)) {
+        setIsConfigOpen(false)
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside)
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside)
+    }
+  }, [])
 
   // --- HANDLERS ---
   const handleTemplateChange = (e) => {
@@ -59,7 +73,6 @@ function App() {
     }
   }
 
-  // Khởi chạy Agentic Loop qua Server-Sent Events (SSE)
   const handleRunAgent = async () => {
     if (!templateFile) {
       alert('Vui lòng tải lên tệp Biểu mẫu báo cáo trống (.docx) ở Bước 1!')
@@ -70,13 +83,13 @@ function App() {
       return
     }
 
-    // Reset các trạng thái
+    // Reset states
     setLogs([])
     setKpiData({})
     setRemarks('')
     setIsCompleted(false)
     setIsRunning(true)
-    setAgentStatusText('🤖 Đang kết nối server và nạp tệp...')
+    setAgentStatusText('Đang nạp tệp tin...')
     setAgentStatusType('running')
 
     const formData = new FormData()
@@ -111,7 +124,6 @@ function App() {
 
         buffer += decoder.decode(value, { stream: true })
         const lines = buffer.split('\n\n')
-        // Giữ lại phần chưa hoàn thành
         buffer = lines.pop()
 
         for (const line of lines) {
@@ -129,13 +141,12 @@ function App() {
     } catch (err) {
       console.error(err)
       setLogs((prev) => [...prev, { type: 'error', message: `Gặp sự cố lỗi: ${err.message}` }])
-      setAgentStatusText('❌ Lỗi thực thi hệ thống')
+      setAgentStatusText('Lỗi thực thi hệ thống')
       setAgentStatusType('error')
       setIsRunning(false)
     }
   }
 
-  // Điều phối sự kiện SSE từ backend
   const handleAgentEvent = (data) => {
     if (data.status === 'init') {
       setSessionId(data.session_id)
@@ -146,7 +157,6 @@ function App() {
         setLogs((prev) => [...prev, { type: 'thought', message: data.thought }])
       }
       if (data.action && data.action !== 'Không rõ') {
-        // Bình dân hóa tên công cụ tiếng Việt
         let friendlyTool = data.action
         if (data.action === 'extract_schema_tool') friendlyTool = 'Quét cấu trúc biểu mẫu trống'
         if (data.action === 'read_and_clean_raw_tool') friendlyTool = 'Bảo mật dữ liệu thô & che giấu PII'
@@ -163,7 +173,7 @@ function App() {
     } 
     else if (data.status === 'completed') {
       setLogs((prev) => [...prev, { type: 'complete', message: 'Tác tử đã hoàn thành toàn bộ mục tiêu! Báo cáo sẵn sàng tải xuống.' }])
-      setAgentStatusText('✅ Hoàn thành thành công')
+      setAgentStatusText('Hoàn thành xử lý')
       setAgentStatusType('success')
       setIsRunning(false)
       setIsCompleted(true)
@@ -176,13 +186,12 @@ function App() {
     } 
     else if (data.status === 'error') {
       setLogs((prev) => [...prev, { type: 'error', message: data.message }])
-      setAgentStatusText('❌ Lỗi trong ReAct Loop')
+      setAgentStatusText('Lỗi trong ReAct Loop')
       setAgentStatusType('error')
       setIsRunning(false)
     }
   }
 
-  // Cập nhật giá trị KPI cụ thể khi cán bộ thay đổi thủ công trên form
   const handleKpiValueChange = (key, value) => {
     setKpiData((prev) => ({
       ...prev,
@@ -190,7 +199,6 @@ function App() {
     }))
   }
 
-  // Tải báo cáo Word hoàn chỉnh về máy khách (Human-in-the-loop)
   const handleDownloadReport = async () => {
     if (!sessionId) {
       alert('Không tìm thấy session hợp lệ. Vui lòng chạy lại Bước 2!')
@@ -204,10 +212,9 @@ function App() {
         kpi_data: kpiData,
         remarks: remarks
       }, {
-        responseType: 'blob' // Nhận file nhị phân
+        responseType: 'blob'
       })
 
-      // Tạo URL download file Word
       const url = window.URL.createObjectURL(new Blob([res.data]))
       const link = document.createElement('a')
       link.href = url
@@ -216,7 +223,6 @@ function App() {
       link.click()
       link.remove()
 
-      // Lưu phong cách thói quen văn phong mẫu
       if (remarks.trim()) {
         const styleForm = new FormData()
         styleForm.append('key', 'phong_cach_nhan_xet')
@@ -233,7 +239,6 @@ function App() {
     }
   }
 
-  // Lấy nhãn chỉ tiêu tiếng Việt rõ ràng
   const getFriendlyKpiName = (key) => {
     let base = key
     if (key.includes('tong_thu_ngan_sach')) base = 'Thu ngân sách nhà nước'
@@ -252,266 +257,362 @@ function App() {
     return key
   }
 
+  // Determine current active step navigation highlight
+  const getStepStatus = (stepNum) => {
+    if (stepNum === 1) {
+      return (templateFile && rawFiles.length > 0) ? 'completed' : 'active'
+    }
+    if (stepNum === 2) {
+      if (isRunning) return 'active'
+      if (isCompleted) return 'completed'
+      return 'inactive'
+    }
+    if (stepNum === 3) {
+      return isCompleted ? 'active' : 'inactive'
+    }
+    return 'inactive'
+  }
+
   return (
-    <div className="bg-slate-950 text-slate-100 min-h-screen flex flex-col font-sans">
+    <div className="bg-[#FAF8F0] min-h-screen flex flex-col font-sans text-slate-800 antialiased">
       
-      <header className="border-b border-slate-800 bg-slate-900/80 backdrop-blur-md sticky top-0 z-50 px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center space-x-3">
-          <div className="bg-indigo-600 p-2.5 rounded-xl shadow-lg shadow-indigo-500/20 text-white">
-            <ShieldAlert className="w-6 h-6" />
+      {/* Header chính */}
+      <header className="border-b border-[#E4E2D3] bg-white px-6 py-4 shadow-sm">
+        <div className="max-w-6xl mx-auto flex items-center justify-between">
+          <div className="flex items-center space-x-3.5">
+            <div className="bg-[#0B54A8] p-3 rounded-xl shadow-md text-white flex items-center justify-center">
+              <ClipboardCheck className="w-6 h-6" />
+            </div>
+            <div>
+              <h1 className="text-xl font-bold tracking-tight text-[#0B54A8] font-sans">Trợ lý tổng hợp báo cáo</h1>
+              <p className="text-xs text-slate-500 font-medium">Hỗ trợ tổng hợp số liệu, kiểm tra nội dung và hoàn thiện báo cáo định kỳ</p>
+            </div>
           </div>
           <div>
-            <h1 className="text-xl font-bold tracking-tight text-white font-sans">VAIC AI Report Agent</h1>
-            <p className="text-xs text-indigo-400 font-medium">Hệ thống Trợ lý Tác tử AI Phân tích & Tự động điền báo cáo</p>
+            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-600 border border-emerald-200">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+              Hệ thống sẵn sàng
+            </span>
           </div>
-        </div>
-        <div className="flex items-center space-x-4">
-          <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-            Tác tử Sẵn sàng Kết nối
-          </span>
         </div>
       </header>
 
-      <div className="flex-1 grid grid-cols-1 lg:grid-cols-4 gap-6 p-6 max-w-7xl mx-auto w-full">
+      {/* Main Content Area */}
+      <main className="flex-1 max-w-6xl w-full mx-auto p-6 space-y-6">
         
-        <aside className="lg:col-span-1 flex flex-col space-y-5">
-          <div className="glass-panel rounded-2xl p-5 shadow-xl">
-            <h2 className="text-lg font-bold text-white mb-4 flex items-center gap-2 border-b border-slate-700 pb-2">
-              <Settings2 className="w-5 h-5 text-indigo-400" />
-              Cấu hình mô hình AI
-            </h2>
-            
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-semibold text-slate-300 mb-1.5">Mô hình Lập luận chính:</label>
-                <div className="relative">
-                  <select 
-                    value={llmModel} 
-                    onChange={(e) => setLlmModel(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500 appearance-none"
-                  >
-                    <option value="Llama-3.3-70B-Instruct">Llama-3.3-70B (FPT Factory)</option>
-                  </select>
-                  <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3 top-3 pointer-events-none" />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-semibold text-slate-300 mb-1.5">Mô hình Vision (Ảnh/Scan):</label>
-                <div className="relative">
-                  <select 
-                    value={visionModel} 
-                    onChange={(e) => setVisionModel(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500 appearance-none"
-                  >
-                    <option value="Qwen2.5-VL-7B-Instruct">Qwen2.5-VL-7B (FPT Factory)</option>
-                  </select>
-                  <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3 top-3 pointer-events-none" />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-semibold text-slate-300 mb-1.5">FPT AI API Key:</label>
-                <input 
-                  type="password" 
-                  value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
-                  placeholder="Nhập khóa API nếu có..." 
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
-                />
-                <p className="text-[11px] text-slate-400 mt-1">Hệ thống sẽ tự động sử dụng khóa API cấu hình sẵn nếu bỏ trống.</p>
-              </div>
-            </div>
+        {/* Title Section */}
+        <div className="flex items-end justify-between flex-wrap gap-4 border-b border-[#E4E2D3] pb-4">
+          <div>
+            <span className="text-[10px] tracking-[0.15em] font-bold text-slate-400 block mb-1">TỔNG HỢP BÁO CÁO ĐỊNH KỲ</span>
+            <h2 className="text-2xl font-bold text-slate-900">Hoàn thiện báo cáo qua 3 bước</h2>
+            <p className="text-sm text-slate-500 mt-0.5">Tải tài liệu, để AI hỗ trợ phân tích, sau đó kiểm tra trước khi xuất báo cáo.</p>
           </div>
-
-          <div className="glass-panel rounded-2xl p-5 shadow-xl bg-indigo-950/20 border-indigo-500/10">
-            <h3 className="text-sm font-bold text-indigo-400 mb-2.5 flex items-center gap-1.5">
-              <HelpCircle className="w-4 h-4" />
-              Hướng dẫn nhanh
-            </h3>
-            <ul className="space-y-2 text-xs text-slate-300 list-decimal pl-4">
-              <li>Nạp tệp tin biểu mẫu trống (.docx) ở Bước 1.</li>
-              <li>Nạp một hoặc nhiều tệp báo cáo thô của phòng ban.</li>
-              <li>Bấm nút "Khởi chạy" ở Bước 2 và quan sát AI tư duy.</li>
-              <li>Duyệt lại số liệu/nhận xét và bấm "Tải về" ở Bước 3.</li>
-            </ul>
-          </div>
-        </aside>
-
-        <main className="lg:col-span-3 flex flex-col space-y-6">
           
-          <section className="glass-panel rounded-2xl p-6 shadow-xl">
-            <h2 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
-              <span className="flex items-center justify-center bg-indigo-600/30 text-indigo-400 w-7 h-7 rounded-lg text-sm font-bold">1</span>
-              Bước 1: Tải lên Biểu mẫu & Báo cáo thô phòng ban
-            </h2>
+          {/* Popover cấu hình */}
+          <div className="relative" ref={configRef}>
+            <button 
+              onClick={() => setIsConfigOpen(!isConfigOpen)}
+              className="bg-white border border-[#E4E2D3] hover:bg-slate-50 px-4 py-2.5 rounded-xl text-sm font-semibold text-slate-700 shadow-sm flex items-center gap-2 cursor-pointer transition-all"
+            >
+              <Settings className="w-4 h-4 text-slate-500" />
+              Tùy chọn hệ thống
+              <ChevronDown className="w-4 h-4 text-slate-400" />
+            </button>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="border-2 border-dashed border-slate-700 hover:border-indigo-500 transition-colors rounded-2xl p-5 flex flex-col items-center justify-center text-center cursor-pointer relative bg-slate-900/50">
-                <input 
-                  type="file" 
-                  accept=".docx" 
-                  onChange={handleTemplateChange}
-                  className="absolute inset-0 opacity-0 cursor-pointer" 
-                />
-                <div className={`p-3 rounded-xl mb-3 ${templateFile ? 'bg-emerald-500/10 text-emerald-400' : 'bg-indigo-600/10 text-indigo-400'}`}>
-                  <FileText className="w-6 h-6" />
+            {isConfigOpen && (
+              <div className="absolute right-0 top-full mt-2 w-80 bg-white border border-[#E4E2D3] rounded-xl shadow-xl p-4 z-50 text-slate-800">
+                <h3 className="text-sm font-bold border-b border-slate-200 pb-2 mb-3 text-[#0B54A8]">Cấu hình mô hình AI</h3>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-600 mb-1.5">Mô hình Lập luận chính:</label>
+                    <select 
+                      value={llmModel} 
+                      onChange={(e) => setLlmModel(e.target.value)}
+                      className="w-full bg-[#FAF8F0] border border-[#E4E2D3] rounded-lg px-2.5 py-2 text-xs focus:outline-none focus:border-[#0B54A8] font-semibold text-slate-700"
+                    >
+                      <option value="Llama-3.3-70B-Instruct">Llama-3.3-70B (FPT Factory)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-600 mb-1.5">Mô hình Vision (Ảnh/Scan):</label>
+                    <select 
+                      value={visionModel} 
+                      onChange={(e) => setVisionModel(e.target.value)}
+                      className="w-full bg-[#FAF8F0] border border-[#E4E2D3] rounded-lg px-2.5 py-2 text-xs focus:outline-none focus:border-[#0B54A8] font-semibold text-slate-700"
+                    >
+                      <option value="Qwen2.5-VL-7B-Instruct">Qwen2.5-VL-7B (FPT Factory)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-600 mb-1.5">FPT AI API Key:</label>
+                    <input 
+                      type="password" 
+                      value={apiKey}
+                      onChange={(e) => setApiKey(e.target.value)}
+                      placeholder="Nhập khóa API cá nhân nếu có..." 
+                      className="w-full bg-[#FAF8F0] border border-[#E4E2D3] rounded-lg px-2.5 py-2 text-xs focus:outline-none focus:border-[#0B54A8] font-medium text-slate-700"
+                    />
+                    <p className="text-[10px] text-slate-400 mt-1">Để trống để sử dụng khóa API cấu hình mặc định trên máy chủ.</p>
+                  </div>
                 </div>
-                <h3 className="text-sm font-bold text-slate-200">
-                  {templateFile ? 'Đã chọn biểu mẫu trống:' : 'Biểu mẫu báo cáo trống (.docx)'}
-                </h3>
-                <p className={`text-xs mt-1 ${templateFile ? 'text-emerald-400 font-semibold' : 'text-slate-400'}`}>
-                  {templateFile ? templateFile.name : 'Kéo thả tệp hoặc bấm để chọn tệp tin'}
-                </p>
               </div>
+            )}
+          </div>
+        </div>
 
-              <div className="border-2 border-dashed border-slate-700 hover:border-indigo-500 transition-colors rounded-2xl p-5 flex flex-col items-center justify-center text-center cursor-pointer relative bg-slate-900/50">
-                <input 
-                  type="file" 
-                  multiple 
-                  accept=".docx,.xlsx,.pdf,.png,.jpg,.jpeg" 
-                  onChange={handleRawFilesChange}
-                  className="absolute inset-0 opacity-0 cursor-pointer" 
-                />
-                <div className={`p-3 rounded-xl mb-3 ${rawFiles.length > 0 ? 'bg-emerald-500/10 text-emerald-400' : 'bg-indigo-600/10 text-indigo-400'}`}>
-                  <Files className="w-6 h-6" />
+        {/* Bộ Stepper Progress Navigation */}
+        <div className="bg-white border border-[#E4E2D3] rounded-2xl p-4 shadow-sm grid grid-cols-1 md:grid-cols-5 gap-3 items-center justify-center">
+          <div className="md:col-span-1 flex items-center justify-center space-x-3 text-center md:text-left py-1">
+            <span className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${
+              getStepStatus(1) === 'completed' ? 'bg-emerald-100 text-emerald-600 border border-emerald-300' : 'bg-[#0B54A8] text-white'
+            }`}>
+              {getStepStatus(1) === 'completed' ? <Check className="w-4 h-4" /> : '1'}
+            </span>
+            <div>
+              <p className="text-xs font-bold text-slate-800">Chọn tài liệu</p>
+              <p className="text-[10px] text-slate-400 font-medium">Biểu mẫu và báo cáo nguồn</p>
+            </div>
+          </div>
+          
+          <div className="hidden md:flex justify-center text-slate-300">
+            <ChevronRight className="w-5 h-5" />
+          </div>
+
+          <div className="md:col-span-1 flex items-center justify-center space-x-3 text-center md:text-left py-1">
+            <span className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${
+              getStepStatus(2) === 'completed' ? 'bg-emerald-100 text-emerald-600 border border-emerald-300' :
+              getStepStatus(2) === 'active' ? 'bg-[#0B54A8] text-white' : 'bg-slate-100 text-slate-400 border border-slate-200'
+            }`}>
+              {getStepStatus(2) === 'completed' ? <Check className="w-4 h-4" /> : '2'}
+            </span>
+            <div>
+              <p className={`text-xs font-bold ${getStepStatus(2) !== 'inactive' ? 'text-slate-800' : 'text-slate-400'}`}>Phân tích</p>
+              <p className="text-[10px] text-slate-400 font-medium">Trích xuất và kiểm tra số liệu</p>
+            </div>
+          </div>
+
+          <div className="hidden md:flex justify-center text-slate-300">
+            <ChevronRight className="w-5 h-5" />
+          </div>
+
+          <div className="md:col-span-1 flex items-center justify-center space-x-3 text-center md:text-left py-1">
+            <span className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${
+              getStepStatus(3) === 'active' ? 'bg-[#0B54A8] text-white' : 'bg-slate-100 text-slate-400 border border-slate-200'
+            }`}>
+              3
+            </span>
+            <div>
+              <p className={`text-xs font-bold ${getStepStatus(3) === 'active' ? 'text-slate-800' : 'text-slate-400'}`}>Kiểm tra và xuất</p>
+              <p className="text-[10px] text-slate-400 font-medium">Hoàn thiện báo cáo Word</p>
+            </div>
+          </div>
+        </div>
+
+        {/* STEP 1: CHỌN TÀI LIỆU */}
+        <section className="bg-white border border-[#E4E2D3] rounded-2xl p-6 shadow-sm">
+          <div className="flex items-center space-x-3 mb-2">
+            <span className="flex items-center justify-center bg-slate-100 text-slate-600 w-8 h-8 rounded-lg text-sm font-bold">1</span>
+            <div>
+              <h2 className="text-md font-bold text-slate-900">Chọn tài liệu</h2>
+              <p className="text-xs text-slate-400 mt-0.5">Tải lên biểu mẫu cần điền và các báo cáo nguồn của phòng ban.</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mt-4">
+            
+            {/* Box Tải biểu mẫu */}
+            <div className="border-2 border-dashed border-[#CFCDBC] hover:border-[#0B54A8] bg-[#FAF8F0]/30 transition-colors rounded-2xl p-6 flex flex-col items-center justify-center text-center cursor-pointer relative min-h-[160px]">
+              <input 
+                type="file" 
+                accept=".docx" 
+                onChange={handleTemplateChange}
+                className="absolute inset-0 opacity-0 cursor-pointer" 
+              />
+              <div className={`p-3.5 rounded-xl mb-3 ${templateFile ? 'bg-emerald-50 text-emerald-600 border border-emerald-200' : 'bg-blue-50 text-[#0B54A8] border border-blue-100'}`}>
+                <FileText className="w-6 h-6" />
+              </div>
+              <h3 className="text-xs font-bold text-slate-700">Biểu mẫu báo cáo</h3>
+              <p className="text-[10px] text-slate-400 mt-1 max-w-[200px]">Tệp Word (.docx) cần được hoàn thiện</p>
+              <span className="mt-3 inline-flex items-center gap-1 text-xs font-bold text-[#0B54A8] bg-white border border-[#E4E2D3] px-3.5 py-1.5 rounded-lg shadow-sm hover:bg-slate-50">
+                <Upload className="w-3.5 h-3.5" />
+                {templateFile ? 'Chọn tệp khác' : 'Chọn tệp từ máy tính'}
+              </span>
+              {templateFile && (
+                <p className="text-[10px] text-emerald-600 font-bold mt-2 truncate max-w-[280px]">✔ {templateFile.name}</p>
+              )}
+            </div>
+
+            {/* Box Tải tài liệu thô */}
+            <div className="border-2 border-dashed border-[#CFCDBC] hover:border-[#0B54A8] bg-[#FAF8F0]/30 transition-colors rounded-2xl p-6 flex flex-col items-center justify-center text-center cursor-pointer relative min-h-[160px]">
+              <input 
+                type="file" 
+                multiple 
+                accept=".docx,.xlsx,.pdf,.png,.jpg,.jpeg" 
+                onChange={handleRawFilesChange}
+                className="absolute inset-0 opacity-0 cursor-pointer" 
+              />
+              <div className={`p-3.5 rounded-xl mb-3 ${rawFiles.length > 0 ? 'bg-emerald-50 text-emerald-600 border border-emerald-200' : 'bg-blue-50 text-[#0B54A8] border border-blue-100'}`}>
+                <Files className="w-6 h-6" />
+              </div>
+              <h3 className="text-xs font-bold text-slate-700">Báo cáo của các phòng ban</h3>
+              <p className="text-[10px] text-slate-400 mt-1 max-w-[200px]">Hỗ trợ Word, Excel, PDF và ảnh scan</p>
+              <span className="mt-3 inline-flex items-center gap-1 text-xs font-bold text-[#0B54A8] bg-white border border-[#E4E2D3] px-3.5 py-1.5 rounded-lg shadow-sm hover:bg-slate-50">
+                <Upload className="w-3.5 h-3.5" />
+                {rawFiles.length > 0 ? 'Chọn tệp khác' : 'Chọn một hoặc nhiều tệp'}
+              </span>
+              {rawFiles.length > 0 && (
+                <p className="text-[10px] text-emerald-600 font-bold mt-2 truncate max-w-[280px]">
+                  ✔ Đã nạp {rawFiles.length} tệp tin
+                </p>
+              )}
+            </div>
+            
+          </div>
+        </section>
+
+        {/* STEP 2: PHÂN TÍCH VÀ KIỂM TRA SỐ LIỆU */}
+        <section className="bg-white border border-[#E4E2D3] rounded-2xl p-6 shadow-sm">
+          <div className="flex items-center justify-between flex-wrap gap-4 border-b border-slate-100 pb-4 mb-4">
+            <div className="flex items-center space-x-3">
+              <span className="flex items-center justify-center bg-slate-100 text-slate-600 w-8 h-8 rounded-lg text-sm font-bold">2</span>
+              <div>
+                <h2 className="text-md font-bold text-slate-900">Phân tích và kiểm tra số liệu</h2>
+                <p className="text-xs text-slate-400 mt-0.5">Al sẽ đọc tài liệu, tổng hợp chỉ tiêu và phát hiện nội dung cần kiểm tra.</p>
+              </div>
+            </div>
+            <button 
+              onClick={handleRunAgent}
+              disabled={isRunning || !templateFile || rawFiles.length === 0}
+              className={`font-bold text-xs px-5 py-2.5 rounded-xl shadow-sm transition-all inline-flex items-center gap-2 cursor-pointer ${
+                isRunning || !templateFile || rawFiles.length === 0
+                  ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed' 
+                  : 'bg-[#0B54A8] hover:bg-[#084184] text-white'
+              }`}
+            >
+              {isRunning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
+              Phân tích báo cáo
+            </button>
+          </div>
+
+          <div className="bg-[#FAF8F0] border border-[#E4E2D3] rounded-xl overflow-hidden">
+            {/* Header Tiến trình */}
+            <div className="bg-white border-b border-[#E4E2D3] px-4 py-2.5 flex items-center justify-between text-xs font-bold text-slate-700">
+              <span className="flex items-center gap-1.5 text-[#0B54A8]">
+                <Loader2 className={`w-4 h-4 ${isRunning ? 'animate-spin text-[#0B54A8]' : 'text-slate-400'}`} />
+                Tiến trình xử lý
+              </span>
+              <span className={`text-xs ${
+                agentStatusType === 'success' ? 'text-emerald-600' :
+                agentStatusType === 'error' ? 'text-rose-600' :
+                agentStatusType === 'running' ? 'text-[#0B54A8] animate-pulse' : 'text-slate-500'
+              }`}>{agentStatusText}</span>
+            </div>
+
+            {/* Khung log ReAct console */}
+            <div 
+              ref={consoleRef}
+              className="p-4 h-60 overflow-y-auto custom-scrollbar font-mono text-xs space-y-2 bg-[#FAF8F0]"
+            >
+              {logs.length === 0 ? (
+                <div className="h-full flex flex-col items-center justify-center text-center text-slate-400 space-y-2 py-8">
+                  <HelpCircle className="w-9 h-9 text-[#CFCDBC]" />
+                  <p className="text-xs font-semibold text-slate-500">Chọn đầy đủ tài liệu rồi nhấn Phân tích báo cáo để bắt đầu.</p>
                 </div>
-                <h3 className="text-sm font-bold text-slate-200">
-                  {rawFiles.length > 0 ? `Đã nạp ${rawFiles.length} tài liệu thô:` : 'Tài liệu thô phòng ban (Nhiều tệp)'}
+              ) : (
+                logs.map((log, index) => {
+                  let badge = '';
+                  let textClass = 'text-slate-600';
+                  
+                  if (log.type === 'thought') {
+                    badge = 'Tác tử lập luận';
+                    textClass = 'text-[#0B54A8] italic font-semibold';
+                  } else if (log.type === 'action') {
+                    badge = 'Gọi công cụ';
+                    textClass = 'text-amber-800 font-bold';
+                  } else if (log.type === 'observation') {
+                    badge = 'Kết quả quan sát';
+                    textClass = 'text-slate-500 text-[11px]';
+                  } else if (log.type === 'error') {
+                    badge = 'Lỗi hệ thống';
+                    textClass = 'text-rose-600 font-bold';
+                  } else if (log.type === 'complete') {
+                    badge = 'Hoàn thành';
+                    textClass = 'text-emerald-700 font-bold';
+                  }
+
+                  return (
+                    <div key={index} className="py-1.5 border-b border-[#E4E2D3]/30 last:border-0">
+                      {badge && (
+                        <span className={`inline-block px-1.5 py-0.5 rounded text-[9px] uppercase font-bold mr-2 ${
+                          log.type === 'thought' ? 'bg-blue-50 text-[#0B54A8] border border-blue-200' :
+                          log.type === 'action' ? 'bg-amber-50 text-amber-800 border border-amber-200' :
+                          log.type === 'observation' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
+                          log.type === 'error' ? 'bg-rose-50 text-rose-700 border border-rose-200' :
+                          'bg-emerald-500 text-white'
+                        }`}>
+                          {badge}
+                        </span>
+                      )}
+                      <span className={textClass}>{log.message}</span>
+                    </div>
+                  )
+                })
+              )}
+            </div>
+          </div>
+        </section>
+
+        {/* STEP 3: KIỂM TRA VÀ XUẤT BÁO CÁO */}
+        <section className="bg-white border border-[#E4E2D3] rounded-2xl p-6 shadow-sm">
+          <div className="flex items-center justify-between flex-wrap gap-4 border-b border-slate-100 pb-4 mb-4">
+            <div className="flex items-center space-x-3">
+              <span className="flex items-center justify-center bg-slate-100 text-slate-600 w-8 h-8 rounded-lg text-sm font-bold">3</span>
+              <div>
+                <h2 className="text-md font-bold text-slate-900">Kiểm tra và xuất báo cáo</h2>
+                <p className="text-xs text-slate-400 mt-0.5">Rà soát số liệu và nội dung nhận xét trước khi tải báo cáo.</p>
+              </div>
+            </div>
+            <button 
+              onClick={handleDownloadReport}
+              disabled={isDownloading || !sessionId || !isCompleted}
+              className={`font-bold text-xs px-5 py-2.5 rounded-xl shadow-sm transition-all inline-flex items-center gap-2 cursor-pointer ${
+                isDownloading || !sessionId || !isCompleted
+                  ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed' 
+                  : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+              }`}
+            >
+              {isDownloading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+              Tải báo cáo Word
+            </button>
+          </div>
+
+          {!isCompleted ? (
+            <div className="bg-[#FAF8F0]/50 border-2 border-dashed border-[#CFCDBC] rounded-xl p-8 text-center flex flex-col items-center justify-center min-h-[220px]">
+              <ClipboardCheck className="w-10 h-10 text-[#CFCDBC] mb-2" />
+              <p className="text-xs font-semibold text-slate-500">Kết quả sẽ hiển thị tại đây sau khi hệ thống phân tích xong.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mt-2">
+              
+              {/* Bảng chỉnh sửa số liệu */}
+              <div className="bg-[#FAF8F0] border border-[#E4E2D3] rounded-xl p-4 flex flex-col">
+                <h3 className="text-xs font-bold text-[#0B54A8] mb-3 flex items-center gap-1.5 border-b border-[#E4E2D3] pb-2">
+                  Chỉ tiêu báo cáo trích xuất
                 </h3>
-                <p className={`text-xs mt-1 truncate max-w-xs ${rawFiles.length > 0 ? 'text-emerald-400 font-semibold' : 'text-slate-400'}`}>
-                  {rawFiles.length > 0 ? rawFiles.map(f => f.name).join(', ') : 'Hỗ trợ Excel, Word, PDF, Ảnh báo cáo...'}
-                </p>
-              </div>
-            </div>
-          </section>
-
-          <section className="glass-panel rounded-2xl p-6 shadow-xl">
-            <div className="text-lg font-bold text-white mb-4 flex items-center justify-between flex-wrap gap-3">
-              <span className="flex items-center gap-2">
-                <span className="flex items-center justify-center bg-indigo-600/30 text-indigo-400 w-7 h-7 rounded-lg text-sm font-bold">2</span>
-                Bước 2: AI tự động phân tích & Kiểm lỗi logic chéo
-              </span>
-              <button 
-                onClick={handleRunAgent}
-                disabled={isRunning}
-                className={`font-bold text-sm px-6 py-2.5 rounded-xl shadow-lg transition-all inline-flex items-center gap-2 ${
-                  isRunning 
-                    ? 'bg-slate-800 text-slate-500 cursor-not-allowed' 
-                    : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-600/25'
-                }`}
-              >
-                {isRunning ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-                Khởi chạy Tác tử AI
-              </button>
-            </div>
-
-            <div className="bg-slate-950 rounded-xl border border-slate-800 p-4">
-              <div className="flex items-center justify-between text-xs text-slate-400 border-b border-slate-800 pb-2 mb-3">
-                <span className="font-semibold flex items-center gap-1.5">
-                  <Terminal className="w-4 h-4 text-indigo-400" />
-                  Nhật ký tư duy của Tác tử AI (ReAct Loop)
-                </span>
-                <span className={`font-semibold ${
-                  agentStatusType === 'success' ? 'text-emerald-400' :
-                  agentStatusType === 'error' ? 'text-rose-400' :
-                  agentStatusType === 'running' ? 'text-indigo-400 animate-pulse' : 'text-slate-500'
-                }`}>{agentStatusText}</span>
-              </div>
-
-              <div 
-                ref={consoleRef}
-                className="h-64 overflow-y-auto custom-scrollbar font-mono text-xs space-y-3 pr-2"
-              >
-                {logs.length === 0 ? (
-                  <div className="text-slate-500 italic">Vui lòng tải lên tệp tin và bấm nút "Khởi chạy Tác tử AI" để bắt đầu...</div>
-                ) : (
-                  logs.map((log, index) => {
-                    let badge = '';
-                    let textClass = 'text-slate-300';
-                    
-                    if (log.type === 'thought') {
-                      badge = 'Tác tử lập luận';
-                      textClass = 'text-indigo-200 italic font-semibold';
-                    } else if (log.type === 'action') {
-                      badge = 'Gọi công cụ';
-                      textClass = 'text-amber-200 font-bold';
-                    } else if (log.type === 'observation') {
-                      badge = 'Kết quả quan sát';
-                      textClass = 'text-slate-400 text-[11px]';
-                    } else if (log.type === 'error') {
-                      badge = 'Lỗi hệ thống';
-                      textClass = 'text-rose-400 font-bold';
-                    } else if (log.type === 'complete') {
-                      badge = 'Hoàn thành';
-                      textClass = 'text-emerald-400 font-bold';
-                    }
-
-                    return (
-                      <div key={index} className="py-1 border-b border-slate-900/50 last:border-0">
-                        {badge && (
-                          <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] uppercase font-bold mr-1.5 ${
-                            log.type === 'thought' ? 'bg-indigo-500/15 text-indigo-400 border border-indigo-500/20' :
-                            log.type === 'action' ? 'bg-amber-500/15 text-amber-400 border border-amber-500/20' :
-                            log.type === 'observation' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
-                            log.type === 'error' ? 'bg-rose-500/15 text-rose-400 border border-rose-500/20' :
-                            'bg-emerald-500 text-slate-950'
-                          }`}>
-                            {badge}
-                          </span>
-                        )}
-                        <span className={textClass}>{log.message}</span>
-                      </div>
-                    )
-                  })
-                )}
-              </div>
-            </div>
-          </section>
-
-          <section className={`glass-panel rounded-2xl p-6 shadow-xl transition-all duration-300 ${
-            isCompleted ? 'opacity-100' : 'opacity-50 pointer-events-none'
-          }`}>
-            <div className="text-lg font-bold text-white mb-5 flex items-center justify-between flex-wrap gap-3">
-              <span className="flex items-center gap-2">
-                <span className="flex items-center justify-center bg-indigo-600/30 text-indigo-400 w-7 h-7 rounded-lg text-sm font-bold">3</span>
-                Bước 3: Hiệu chỉnh số liệu & Tải báo cáo Word hoàn chỉnh
-              </span>
-              <button 
-                onClick={handleDownloadReport}
-                disabled={isDownloading || !sessionId}
-                className={`font-bold text-sm px-6 py-2.5 rounded-xl shadow-lg transition-all inline-flex items-center gap-2 ${
-                  isDownloading || !sessionId
-                    ? 'bg-slate-800 text-slate-500 cursor-not-allowed' 
-                    : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-600/25'
-                }`}
-              >
-                {isDownloading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-                Tải báo cáo Word (.docx)
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-              <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-4 flex flex-col">
-                <h3 className="text-sm font-bold text-indigo-400 mb-3 flex items-center gap-1.5">
-                  <Table className="w-4 h-4" />
-                  Số liệu trích xuất chỉ tiêu báo cáo
-                </h3>
-                <div className="space-y-3 max-h-80 overflow-y-auto custom-scrollbar pr-1 flex-1">
+                <div className="space-y-2.5 max-h-[340px] overflow-y-auto custom-scrollbar pr-1.5">
                   {Object.keys(kpiData).length === 0 ? (
-                    <p className="text-xs text-slate-500 italic">Chưa có số liệu trích xuất...</p>
+                    <p className="text-xs text-slate-500 italic">Không tìm thấy chỉ số chỉ tiêu tương thích.</p>
                   ) : (
                     Object.entries(kpiData).map(([key, val]) => (
-                      <div key={key} className="flex items-center justify-between gap-4 p-2 bg-slate-950/40 rounded-lg border border-slate-800/60">
-                        <label className="text-xs font-semibold text-slate-300 w-2/3 truncate" title={key}>
+                      <div key={key} className="flex items-center justify-between gap-4 p-2 bg-white rounded-lg border border-[#E4E2D3]">
+                        <label className="text-xs font-bold text-slate-600 w-2/3 truncate" title={key}>
                           {getFriendlyKpiName(key)}
                         </label>
                         <input 
                           type="text" 
                           value={val !== null ? val : ''} 
                           onChange={(e) => handleKpiValueChange(key, e.target.value)}
-                          className="w-1/3 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-right text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+                          className="w-1/3 bg-[#FAF8F0] border border-[#E4E2D3] rounded px-2.5 py-1 text-right text-xs font-bold text-slate-800 focus:outline-none focus:border-[#0B54A8]"
                         />
                       </div>
                     ))
@@ -519,27 +620,29 @@ function App() {
                 </div>
               </div>
 
-              <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-4 flex flex-col">
-                <h3 className="text-sm font-bold text-indigo-400 mb-3 flex items-center gap-1.5">
-                  <Edit3 className="w-4 h-4" />
-                  Đoạn văn nhận xét đánh giá (Cán bộ có thể chỉnh sửa)
+              {/* Bảng chỉnh sửa nhận định */}
+              <div className="bg-[#FAF8F0] border border-[#E4E2D3] rounded-xl p-4 flex flex-col">
+                <h3 className="text-xs font-bold text-[#0B54A8] mb-3 flex items-center gap-1.5 border-b border-[#E4E2D3] pb-2">
+                  Đoạn văn nhận định đánh giá (Cán bộ có thể chỉnh sửa)
                 </h3>
                 <textarea 
-                  rows={12} 
+                  rows={14} 
                   value={remarks}
                   onChange={(e) => setRemarks(e.target.value)}
                   placeholder="Đoạn văn nhận định của AI sẽ hiển thị ở đây..."
-                  className="w-full bg-slate-955 border border-slate-800 rounded-lg p-3 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 font-sans custom-scrollbar flex-1 resize-none bg-slate-950"
+                  className="w-full bg-white border border-[#E4E2D3] rounded-lg p-3 text-xs text-slate-700 focus:outline-none focus:border-[#0B54A8] font-sans custom-scrollbar flex-1 resize-none font-medium leading-relaxed"
                 />
               </div>
+              
             </div>
-          </section>
+          )}
+        </section>
 
-        </main>
-      </div>
+      </main>
 
-      <footer className="border-t border-slate-900 bg-slate-950 py-4 text-center text-xs text-slate-500">
-        © 2026 Ủy ban nhân dân cấp phường. Thiết kế React Frontend di trú thông suốt - Production Ready.
+      {/* Footer */}
+      <footer className="border-t border-[#E4E2D3] bg-white py-4 text-center text-xs text-slate-400 font-semibold mt-12">
+        © 2026 Ủy ban nhân dân cấp phường. Thiết kế React Frontend di trú thông suốt.
       </footer>
     </div>
   )

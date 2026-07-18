@@ -1,30 +1,29 @@
 @import "tailwindcss";
 
 @layer utilities {
-  /* Tùy chỉnh thanh cuộn log */
+  /* Tùy chỉnh thanh cuộn */
   .custom-scrollbar::-webkit-scrollbar {
-    width: 8px;
+    width: 6px;
   }
   .custom-scrollbar::-webkit-scrollbar-track {
-    background: #1e1b4b;
-    border-radius: 6px;
+    background: #f3f1e9;
+    border-radius: 4px;
   }
   .custom-scrollbar::-webkit-scrollbar-thumb {
-    background: #4f46e5;
-    border-radius: 6px;
+    background: #cfcdbe;
+    border-radius: 4px;
   }
   
-  /* Hiệu ứng Glassmorphism */
+  /* Panel màu trắng nổi khối */
   .glass-panel {
-    background: rgba(30, 41, 59, 0.7);
-    backdrop-filter: blur(12px);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: #ffffff;
+    border: 1px solid #e4e2d3;
   }
 }
 
 body {
   font-family: 'Be Vietnam Pro', 'Outfit', system-ui, -apple-system, sans-serif;
-  background-color: #020617;
-  color: #f8fafc;
+  background-color: #FAF8F0; /* Nền hơi ngả vàng/kem ấm áp */
+  color: #1f2937;
   min-height: 100vh;
 }
