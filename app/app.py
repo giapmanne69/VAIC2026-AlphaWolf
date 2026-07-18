@@ -1,7 +1,12 @@
+import sys
+from pathlib import Path
+
+# Tự động cấu hình PYTHONPATH trỏ về thư mục gốc của dự án
+sys.path.append(str(Path(__file__).resolve().parent.parent))
+
 import streamlit as st
 import json
 import tempfile
-from pathlib import Path
 import pandas as pd
 
 # Thiết lập cấu hình trang Streamlit (phải ở dòng đầu tiên)
