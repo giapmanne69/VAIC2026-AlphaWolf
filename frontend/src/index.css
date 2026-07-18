@@ -1,0 +1,30 @@
+@import "tailwindcss";
+
+@layer utilities {
+  /* Tùy chỉnh thanh cuộn log */
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 8px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: #1e1b4b;
+    border-radius: 6px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: #4f46e5;
+    border-radius: 6px;
+  }
+  
+  /* Hiệu ứng Glassmorphism */
+  .glass-panel {
+    background: rgba(30, 41, 59, 0.7);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+}
+
+body {
+  font-family: 'Be Vietnam Pro', 'Outfit', system-ui, -apple-system, sans-serif;
+  background-color: #020617;
+  color: #f8fafc;
+  min-height: 100vh;
+}
