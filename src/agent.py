@@ -305,7 +305,7 @@ class AgenticReportAgent:
             if cache_val:
                 masked_text = cache_val["masked_text"]
                 self.restore_maps[file_path] = cache_val["restore_map"]
-                self.agent_state["raw_text_cache"]["masked_text"] = masked_text
+                self.agent_state["raw_text_cache"][file_path] = masked_text
                 logger.info(f"Đọc tệp tin {file_path} từ Cache thành công.")
                 return {
                     "masked_text": masked_text[:1000] + "\n... [Văn bản được rút gọn trong ReAct Context] ...",
@@ -320,7 +320,7 @@ class AgenticReportAgent:
                 
             masked_text, restore_map = self.anonymizer.anonymize(raw_text)
             self.restore_maps[file_path] = restore_map
-            self.agent_state["raw_text_cache"]["masked_text"] = masked_text
+            self.agent_state["raw_text_cache"][file_path] = masked_text
             
             # Save to Cache
             self.memory_manager.cache_set(file_path, {
@@ -350,7 +350,16 @@ class AgenticReportAgent:
             }
             
         elif tool_name == "extract_kpis_tool":
-            raw_text = tool_input.get("raw_text") or self.agent_state.get("raw_text_cache", {}).get("masked_text", "")
+            raw_text = tool_input.get("raw_text")
+            if not raw_text:
+                raw_text_cache = self.agent_state.get("raw_text_cache", {})
+                if raw_text_cache:
+                    raw_text_sections = []
+                    for path, text in raw_text_cache.items():
+                        raw_text_sections.append(f"\n\n--- [FILE: {Path(path).name}] ---\n{text}")
+                    raw_text = "\n".join(raw_text_sections)
+                else:
+                    raw_text = ""
             schema = tool_input.get("schema") or self.agent_state.get("schema", {})
             
             sys_p, user_p = self._load_prompt("raw_extractor.yaml")
@@ -383,7 +392,12 @@ class AgenticReportAgent:
                                 unit = "ngày"
                             break
                             
-                source_file = list(self.restore_maps.keys())[0] if self.restore_maps else "unknown_source"
+                if len(self.restore_maps) == 1:
+                    source_file = next(iter(self.restore_maps.keys()))
+                elif len(self.restore_maps) > 1:
+                    source_file = "multiple_files"
+                else:
+                    source_file = "unknown_source"
                 
                 if self.session_id:
                     self.memory_manager.save_indicator(
