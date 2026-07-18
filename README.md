@@ -210,16 +210,17 @@ Các quy chế và ranh giới hoạt động quy định hành vi của tác t�
 
 ---
 
-# 7. Công nghệ đề xuất
+# 7. Công nghệ đề xuất & Cấu hình Mô hình
 
-- **LLM:** Llama-3.3-70B-Instruct (hoặc tương đương)
-- **RAG:** Vector Database + Embedding Model
-- **Document Processing:** OCR + Parser (Word, Excel, PDF)
-- **Rule Engine:** Chuẩn hóa dữ liệu và kiểm tra nghiệp vụ
-- **Backend:** FastAPI
-- **Frontend:** Streamlit
-- **Database:** PostgreSQL
-- **Vector Database:** FAISS
+Hệ thống được cấu hình tối ưu để sử dụng các mô hình và thư viện mã nguồn mở chất lượng cao thông qua **API FPT AI Factory** và xử lý local:
+
+- **Mô hình lập luận chính (Reasoning LLM):** `Llama-3.3-70B-Instruct` (Gọi qua API tương thích OpenAI của FPT AI Factory) - xử lý trích xuất số liệu, phân tích biểu mẫu động, và tự sửa sai số liệu (Self-Correction).
+- **Mô hình xử lý tài liệu quét/ảnh (Vision LLM):** `Qwen2.5-VL-7B-Instruct` - xử lý đọc trực tiếp bố cục văn bản, bảng biểu trên file PDF scan hoặc hình ảnh chụp không cần qua OCR truyền thống.
+- **Mô hình nhúng RAG (Embedding Model):** `multilingual-e5-large` (hoặc `Vietnamese_Embedding`) - biểu diễn ngữ nghĩa tri thức pháp luật.
+- **Mô hình xếp hạng lại (Reranker Model):** `bge-reranker-v2-m3` - tối ưu hóa kết quả tìm kiếm ngữ cảnh luật chính xác nhất.
+- **Cơ sở dữ liệu Vector (Vector Database):** `FAISS` (Local CPU-based, gọn nhẹ và miễn phí) - lưu trữ chỉ mục tri thức luật RAG.
+- **Xử lý tài liệu:** `python-docx` / `docxtpl` (Word template injection), `openpyxl` (Excel parser), `pdfplumber` (PDF parser), `pytesseract` (OCR).
+- **Giao diện người dùng (Frontend & Backend):** `Streamlit` (Chạy local/máy chủ Windows nội bộ của phường, giao diện trực quan).
 
 ---
 
