@@ -3,12 +3,15 @@ import uuid
 import json
 import logging
 import shutil
+import io
+import re
 from pathlib import Path
 from typing import List
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from docx import Document
 
 from config import settings
 from src.agent import AgenticReportAgent
@@ -53,6 +56,101 @@ def clean_session_dir(session_id: str):
             logger.info(f"Đã dọn dẹp thư mục session: {session_id}")
         except Exception as e:
             logger.error(f"Không thể dọn dẹp session {session_id}: {str(e)}")
+
+
+def auto_inject_jinja_tags(template_bytes: bytes) -> bytes:
+    """
+    Tự động phân tích cấu trúc tệp Word mẫu trống (.docx) do người dùng tải lên,
+    tìm các ký tự giữ chỗ cổ điển (như [..........], [Điền], AI Assistant Template)
+    và thay thế bằng thẻ Jinja {{ ... }} tương ứng để docxtpl có thể điền được.
+    """
+    try:
+        doc = Document(io.BytesIO(template_bytes))
+        
+        # 1. Quét qua các đoạn văn (paragraphs) để chèn các thẻ nhận xét riêng biệt
+        ai_template_counter = 0
+        for p in doc.paragraphs:
+            text = p.text
+            if "[Kỳ báo cáo]" in text:
+                text = text.replace("[Kỳ báo cáo]", "{{ so_ngay_thang_nam }}")
+            if "[Kỳ tiếp theo]" in text:
+                text = text.replace("[Kỳ tiếp theo]", "Kỳ tiếp theo")
+            if "⚡ [AI Assistant Template]" in text or "AI Assistant Template" in text:
+                ai_template_counter += 1
+                if ai_template_counter == 1:
+                    text = "{{ nhan_xet_ai_kinh_te }}"
+                elif ai_template_counter == 2:
+                    text = "{{ nhan_xet_ai_van_hoa_xa_hoi }}"
+                elif ai_template_counter == 3:
+                    text = "{{ nhan_xet_ai_quoc_phong_an_ninh }}"
+                else:
+                    text = "{{ nhan_xet_ai_phuong_huong }}"
+            p.text = text
+            
+        # 2. Quét qua các bảng biểu (tables)
+        for table in doc.tables:
+            for row in table.rows:
+                cells = row.cells
+                if len(cells) < 2:
+                    continue
+                
+                # Kiểm tra thông tin hành chính ở cột đầu tiên
+                first_cell_text = cells[0].text.strip()
+                if "UBND QUẬN/HUYỆN" in first_cell_text:
+                    text = cells[0].text
+                    if "[..........]" in text:
+                        text = text.replace("[..........]", "{{ ten_co_quan_cap_on }}", 1)
+                    if "[..........]" in text:
+                        text = text.replace("[..........]", "{{ ten_co_quan_cap_duoi }}", 1)
+                    cells[0].text = text
+                    
+                    # Địa danh ngày tháng năm
+                    if len(cells) > 1 and "ngày ...... tháng" in cells[1].text:
+                        cells[1].text = "{{ so_ngay_thang_nam }}"
+                        
+                # Tên chỉ tiêu ở cột index 1
+                indicator_name = cells[1].text.strip()
+                indicator_lower = indicator_name.lower()
+                
+                # Ký tên chủ tịch ở cuối bảng
+                last_cell_text = cells[-1].text.strip()
+                if "CHỦ TỊCH" in last_cell_text or "Chủ tịch" in last_cell_text:
+                    text = cells[-1].text
+                    if "[Điền họ và tên Chủ tịch]" in text:
+                        cells[-1].text = text.replace("[Điền họ và tên Chủ tịch]", "{{ ten_chu_tich }}")
+                
+                # So khớp từ khóa để map chỉ tiêu
+                var_base = None
+                if "thu ngân sách" in indicator_lower:
+                    var_base = "tong_thu_ngan_sach_nha_nuoc"
+                elif "chi ngân sách" in indicator_lower:
+                    var_base = "tong_chi_ngan_sach_dia_phuong"
+                elif "khai sinh" in indicator_lower:
+                    var_base = "dang_ky_khai_sinh"
+                elif "khai tử" in indicator_lower or "khai tu" in indicator_lower:
+                    var_base = "dang_ky_khai_tu"
+                elif "cư trú" in indicator_lower or "tạm trú" in indicator_lower:
+                    var_base = "tam_tru_moi"
+                elif "chứng thực" in indicator_lower:
+                    var_base = "chung_thuc_chu_ky"
+                elif "an ninh" in indicator_lower or "trật tự" in indicator_lower:
+                    var_base = "vi_pham_an_ninh_trat_tu"
+                
+                if var_base:
+                    # Kỳ trước (Cột 4 / Index 3)
+                    if len(cells) > 3 and ("[Điền]" in cells[3].text or cells[3].text.strip() == ""):
+                        cells[3].text = f"{{{{ {var_base}_ky_truoc }}}}"
+                    # Kỳ báo cáo (Cột 5 / Index 4)
+                    if len(cells) > 4 and ("[Điền]" in cells[4].text or cells[4].text.strip() == ""):
+                        cells[4].text = f"{{{{ {var_base}_ky_bao_cao }}}}"
+                        
+        output_stream = io.BytesIO()
+        doc.save(output_stream)
+        logger.info("Tự động chèn thẻ Jinja thành công vào tệp biểu mẫu.")
+        return output_stream.getvalue()
+    except Exception as e:
+        logger.exception("Lỗi khi tự động chèn thẻ Jinja vào biểu mẫu trống:")
+        raise e
 
 
 @app.get("/api/health")
@@ -100,11 +198,19 @@ async def run_agent(
     session_path = SESSIONS_DIR / session_id
     session_path.mkdir(parents=True, exist_ok=True)
 
-    # Lưu file biểu mẫu trống
+    # Lưu file biểu mẫu trống (tự động chèn thẻ Jinja)
     template_ext = Path(template.filename).suffix
+    template_bytes = await template.read()
+    if template_ext.lower() == ".docx":
+        try:
+            template_bytes = auto_inject_jinja_tags(template_bytes)
+            logger.info("Đã tự động chèn thẻ Jinja thành công vào biểu mẫu trống.")
+        except Exception as e:
+            logger.error(f"Lỗi khi tự động chèn thẻ Jinja: {str(e)}")
+            
     template_save_path = session_path / f"template{template_ext}"
     with open(template_save_path, "wb") as f:
-        f.write(await template.read())
+        f.write(template_bytes)
 
     # Lưu danh sách báo cáo phòng ban thô
     raw_save_paths = []
@@ -191,9 +297,6 @@ def render_docx(req: RenderRequest, background_tasks: BackgroundTasks):
             "remarks_dict": remarks_dict,
             "output_path": str(output_docx_path)
         })
-
-        # Đăng ký tác vụ dọn dẹp thư mục tạm session ở background sau khi trả file về
-        background_tasks.add_task(clean_session_dir, session_id)
 
         return FileResponse(
             path=output_docx_path,

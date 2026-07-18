@@ -468,6 +468,19 @@ class AgenticReportAgent:
 
             # Trường hợp 1: Tác tử đưa ra Final Answer (Hoàn thành nhiệm vụ)
             if final_answer:
+                if not isinstance(final_answer, dict):
+                    final_answer = {"status": "success", "message": str(final_answer)}
+                if "kpi_data" not in final_answer or not final_answer["kpi_data"]:
+                    final_answer["kpi_data"] = agent_state["kpi_data"]
+                if "combined_remarks" not in final_answer or not final_answer["combined_remarks"]:
+                    rem = agent_state.get("remarks", {})
+                    combined_remarks = (
+                        f"=== KHỐI KINH TẾ ===\n{rem.get('nhan_xet_ai_kinh_te', '')}\n\n"
+                        f"=== KHỐI VĂN HÓA - XÃ HỘI ===\n{rem.get('nhan_xet_ai_van_hoa_xa_hoi', '')}\n\n"
+                        f"=== KHỐI QUỐC PHÒNG - AN NINH ===\n{rem.get('nhan_xet_ai_quoc_phong_an_ninh', '')}\n\n"
+                        f"=== PHƯƠNG HƯỚNG KỲ TỚI ===\n{rem.get('nhan_xet_ai_phuong_huong', '')}"
+                    )
+                    final_answer["combined_remarks"] = combined_remarks
                 yield {
                     "status": "completed",
                     "step": step_counter,
