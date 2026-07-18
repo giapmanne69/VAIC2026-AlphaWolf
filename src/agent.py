@@ -11,6 +11,7 @@ from docxtpl import DocxTemplate
 from config import settings
 from src.hooks import AnonymizerHook, RedactionHook
 from src.tools import DocParser, Standardizer, RuleEngine, RAGSearchTool
+from src.tools.memory_manager import MemoryManager
 from src.memory import ShortTermMemory, LongTermMemory
 
 # Đảm bảo thư mục data/ đã được khởi tạo
@@ -18,10 +19,12 @@ Path(settings.DATA_DIR).mkdir(parents=True, exist_ok=True)
 
 # Cấu hình logging ghi file agent_execution.log tiếng Việt UTF-8
 logging.basicConfig(
-    filename=str(Path(settings.DATA_DIR) / "agent_execution.log"),
     level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
-    encoding="utf-8"
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.FileHandler(settings.DATA_DIR / "agent_execution.log", encoding="utf-8"),
+        logging.StreamHandler()
+    ]
 )
 logger = logging.getLogger("AgenticReportAgent")
 
@@ -34,6 +37,7 @@ class AgenticReportAgent:
             self.standardizer = Standardizer()
             self.rule_engine = RuleEngine()
             self.rag_search = RAGSearchTool()
+            self.memory_manager = MemoryManager()
             
             self.anonymizer = AnonymizerHook()
             self.redaction = RedactionHook()
@@ -52,6 +56,7 @@ class AgenticReportAgent:
                 "remarks": {},
                 "raw_text_cache": {}
             }
+            self.session_id = None
             logger.info("Khởi tạo thành công OpenAI Client kết nối FPT AI Factory.")
         except Exception as e:
             logger.exception("Lỗi khi khởi tạo AgenticReportAgent:")
@@ -294,8 +299,21 @@ class AgenticReportAgent:
             
         elif tool_name == "read_and_clean_raw_tool":
             file_path = tool_input.get("file_path")
-            raw_text = self.parser.parse(file_path)
             
+            # Check cache
+            cache_val = self.memory_manager.cache_get(file_path)
+            if cache_val:
+                masked_text = cache_val["masked_text"]
+                self.restore_maps[file_path] = cache_val["restore_map"]
+                self.agent_state["raw_text_cache"]["masked_text"] = masked_text
+                logger.info(f"Đọc tệp tin {file_path} từ Cache thành công.")
+                return {
+                    "masked_text": masked_text[:1000] + "\n... [Văn bản được rút gọn trong ReAct Context] ...",
+                    "restore_map_len": len(cache_val["restore_map"]),
+                    "is_redacted": False
+                }
+                
+            raw_text = self.parser.parse(file_path)
             is_safe, found_secrets = self.redaction.is_safe(raw_text)
             if not is_safe:
                 raw_text = self.redaction.redact(raw_text)
@@ -303,8 +321,30 @@ class AgenticReportAgent:
             masked_text, restore_map = self.anonymizer.anonymize(raw_text)
             self.restore_maps[file_path] = restore_map
             self.agent_state["raw_text_cache"]["masked_text"] = masked_text
-            return {
+            
+            # Save to Cache
+            self.memory_manager.cache_set(file_path, {
                 "masked_text": masked_text,
+                "restore_map": restore_map
+            })
+            
+            # Update task progress
+            if self.session_id:
+                progress = self.memory_manager.get_progress(self.session_id)
+                if progress:
+                    comp_files = progress.get("completed_files", [])
+                    if file_path not in comp_files:
+                        comp_files.append(file_path)
+                    self.memory_manager.update_progress(
+                        task_id=self.session_id,
+                        current_step=progress["current_step"] + 1,
+                        current_file=file_path,
+                        completed_files=comp_files,
+                        status="running"
+                    )
+            
+            return {
+                "masked_text": masked_text[:1000] + "\n... [Văn bản được rút gọn trong ReAct Context] ...",
                 "restore_map_len": len(restore_map),
                 "is_redacted": not is_safe
             }
@@ -325,7 +365,59 @@ class AgenticReportAgent:
                 for k, v in list(doc_data.items()):
                     if isinstance(v, str):
                         doc_data[k] = self.anonymizer.deanonymize(v, restore_map)
-            return doc_data
+                        
+            # Lưu vào MemoryManager và cập nhật kpi_data
+            for key, val in doc_data.items():
+                unit = None
+                if schema and "variables" in schema:
+                    for var in schema["variables"]:
+                        if var["name"] == key:
+                            desc = var.get("description", "").lower()
+                            if "đồng" in desc:
+                                unit = "đồng"
+                            elif "người" in desc:
+                                unit = "người"
+                            elif "vụ" in desc:
+                                unit = "vụ"
+                            elif "ngày" in desc:
+                                unit = "ngày"
+                            break
+                            
+                source_file = list(self.restore_maps.keys())[0] if self.restore_maps else "unknown_source"
+                
+                if self.session_id:
+                    self.memory_manager.save_indicator(
+                        task_id=self.session_id,
+                        indicator_name=key,
+                        value=val,
+                        unit=unit,
+                        source_file=source_file,
+                        confidence=1.0
+                    )
+                    
+            self.agent_state["kpi_data"].update(doc_data)
+            
+            return {
+                "status": "success",
+                "message": f"Đã trích xuất số liệu và lưu {len(doc_data)} chỉ tiêu vào bộ nhớ nghiệp vụ thành công.",
+                "extracted_keys": list(doc_data.keys())
+            }
+            
+        elif tool_name == "retrieve_memory_tool":
+            query = tool_input.get("query")
+            if not self.session_id:
+                return []
+            indicators = self.memory_manager.search_indicator(self.session_id, query)
+            simplified = []
+            for ind in indicators:
+                simplified.append({
+                    "indicator_name": ind["indicator_name"],
+                    "value": ind["value"],
+                    "unit": ind["unit"],
+                    "source_file": Path(ind["source_file"]).name if ind["source_file"] else None,
+                    "confidence": ind["confidence"]
+                })
+            return simplified
             
         elif tool_name == "validate_and_correct_tool":
             kpi_data = tool_input.get("kpi_data") or self.agent_state.get("kpi_data", {})
@@ -335,7 +427,7 @@ class AgenticReportAgent:
         elif tool_name == "rag_search_tool":
             query = tool_input.get("query")
             domain = tool_input.get("domain")
-            return self.rag_search.retrieve_context(query, domain_filter=domain)
+            return self.memory_manager.search_document(query, domain_filter=domain)
             
         elif tool_name == "generate_section_remarks_tool":
             kpi_data = tool_input.get("kpi_data") or self.agent_state.get("kpi_data", {})
@@ -346,7 +438,7 @@ class AgenticReportAgent:
                 queries = ["chế độ báo cáo thông tư nghị định", "quy trình giải quyết khiếu nại tố cáo", "dân cư cư trú hộ tịch"]
                 context_blocks = []
                 for q in queries:
-                    res = self.rag_search.retrieve_context(q, top_k=2)
+                    res = self.memory_manager.search_document(q, top_k=2)
                     if "Không tìm thấy" not in res:
                         context_blocks.append(res)
                 effective_rag_context = "\n\n".join(context_blocks) if context_blocks else "Không có văn cảnh quy định cụ thể."
@@ -384,6 +476,9 @@ class AgenticReportAgent:
             out_p.parent.mkdir(parents=True, exist_ok=True)
             doc.save(out_p)
             
+            if self.session_id:
+                self.memory_manager.finish_task(self.session_id, "completed")
+            
             return {
                 "status": "success",
                 "output_path": output_path,
@@ -393,13 +488,17 @@ class AgenticReportAgent:
             raise ValueError(f"Không tìm thấy công cụ nghiệp vụ: {tool_name}")
 
     def run_react_agent_generator(
-        self, template_path: str, raw_paths: List[str], output_path: str, rag_context: str = ""
+        self, template_path: str, raw_paths: List[str], output_path: str, rag_context: str = "", session_id: str = None
     ) -> Generator[Dict[str, Any], None, None]:
         """
         Khởi chạy vòng lặp ReAct tự trị và sinh ra (yield) từng bước logs, thoughts, actions
         dưới dạng JSON string phục vụ Server-Sent Events (SSE) hiển thị tư duy AI lên React.
         """
         logger.info("BẮT ĐẦU VÒNG LẶP REACT AGENT TỰ TRỊ")
+        
+        import uuid
+        self.session_id = session_id or str(uuid.uuid4())
+        self.memory_manager.create_task(self.session_id, len(raw_paths))
         
         sys_p, user_p = self._load_prompt("agent_react.yaml")
         formatted_user_p = user_p.format(

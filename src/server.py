@@ -294,7 +294,8 @@ async def run_agent(
         react_gen = agent.run_react_agent_generator(
             template_path=str(template_save_path),
             raw_paths=raw_save_paths,
-            output_path=str(output_report_path)
+            output_path=str(output_report_path),
+            session_id=session_id
         )
 
         for step_data in react_gen:

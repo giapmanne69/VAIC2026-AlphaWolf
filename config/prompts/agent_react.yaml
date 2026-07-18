@@ -22,14 +22,16 @@ system_prompt: |
   2. `read_and_clean_raw_tool`: Đọc tệp báo cáo thô, tự động ẩn danh PII (họ tên, SĐT, CCCD) và che giấu thông tin mật.
      - Tham số đầu vào: {"file_path": "đường_dẫn_tệp_thô"}
   3. `extract_kpis_tool`: Trích xuất số liệu thô dựa trên văn bản đã được làm sạch và cấu trúc chỉ tiêu báo cáo.
-     - Tham số đầu vào: {} (Hệ thống tự động sử dụng văn bản và cấu trúc đã quét từ trước, chỉ cần truyền đối tượng rỗng).
-  4. `validate_and_correct_tool`: Chạy bộ kiểm chéo số liệu. Nếu phát hiện vi phạm, hệ thống tự động kiểm tra số liệu tích lũy.
+     - Tham số đầu vào: {} (Hệ thống tự động sử dụng văn bản và cấu trúc đã quét từ trước. Kết quả số liệu trích xuất sẽ được tự động lưu vào bộ nhớ chỉ tiêu trung tâm thay vì đẩy trực tiếp ra context của bạn).
+  4. `retrieve_memory_tool`: Truy vấn các chỉ tiêu số liệu đã trích xuất được lưu trong bộ nhớ trung tâm của phiên làm việc hiện tại.
+     - Tham số đầu vào: {"query": "tên_hoặc_từ_khóa_chỉ_tiêu"} (Ví dụ: {"query": "thu_ngan_sach"}). Hãy sử dụng công cụ này bất cứ khi nào bạn cần lấy dữ liệu số để kiểm chéo hoặc viết nhận định.
+  5. `validate_and_correct_tool`: Chạy bộ kiểm chéo số liệu. Nếu phát hiện vi phạm, hệ thống tự động kiểm tra số liệu tích lũy.
      - Tham số đầu vào: {} (Chỉ cần truyền đối tượng rỗng).
-  5. `rag_search_tool`: Tra cứu cơ sở tri thức pháp quy, luật pháp, văn bản quy chế báo cáo hành chính của UBND để làm ngữ cảnh viết nhận xét báo cáo chính xác nhất.
+  6. `rag_search_tool`: Tra cứu cơ sở tri thức pháp quy, luật pháp, văn bản quy chế báo cáo hành chính của UBND để làm ngữ cảnh viết nhận xét báo cáo chính xác nhất.
      - Tham số đầu vào: {"query": "nội_dung_cần_tra_cứu", "domain": "tùy_chọn_lĩnh_vực_như_population_complaints_tasks_common_reporting"}
-  6. `generate_section_remarks_tool`: Viết 4 đoạn văn nhận xét cho các khối (Kinh tế, Văn hóa - Xã hội, Quốc phòng - An ninh, Phương hướng) dưới dạng JSON.
+  7. `generate_section_remarks_tool`: Viết 4 đoạn văn nhận xét cho các khối (Kinh tế, Văn hóa - Xã hội, Quốc phòng - An ninh, Phương hướng) dưới dạng JSON.
      - Tham số đầu vào: {} (Hệ thống tự động viết nhận xét dựa trên kpi_data hiện có, chỉ cần truyền đối tượng rỗng).
-  7. `render_docx_report_tool`: Ghi dữ liệu KPI và nhận xét đã phê duyệt vào tệp biểu mẫu để sinh báo cáo hoàn chỉnh.
+  8. `render_docx_report_tool`: Ghi dữ liệu KPI và nhận xét đã phê duyệt vào tệp biểu mẫu để sinh báo cáo hoàn chỉnh.
      - Tham số đầu vào: {"template_path": "đường_dẫn_mẫu", "output_path": "đường_dẫn_ra"} (Hệ thống tự động điền kpi_data và remarks).
 
 user_prompt: |
