@@ -12,5 +12,10 @@ venv/
 .env
 .env.local
 
-# VS Code Workspace
 VAIC_Project.code-workspace
+
+# User data directories
+data/output_reports/
+data/raw_inputs/
+data/templates/
+data/*.log
