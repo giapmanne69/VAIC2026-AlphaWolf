@@ -223,6 +223,8 @@ Các quy chế và ranh giới hoạt động quy định hành vi của tác t�
 
 ---
 
+---
+
 # 8. Mục tiêu
 
 Xây dựng một tác tử **Agentic AI** có khả năng tự động:
@@ -234,4 +236,67 @@ Xây dựng một tác tử **Agentic AI** có khả năng tự động:
 - Sinh báo cáo đúng mẫu của UBND.
 - Hỗ trợ lãnh đạo theo dõi tình hình và ra quyết định.
 
-Con người chủ yếu thực hiện kiểm duyệt và phê duyệt báo cáo cuối cùng.
+Con người chủ yếu thực hiện kiểm duyệt và phê duyệt báo cáo cuối cùng.
+
+---
+
+# 9. Cấu trúc thư mục dự án
+
+```text
+VAIC_Project/
+│
+├── .gemini/                    # Lưu trữ phiên làm việc của trợ lý lập trình
+│   ├── sessions/
+│   │   ├── db3e35ac-a11d-46a5-8c0a-a33cb5450688.pb  # File session của trợ lý
+│   │   └── transcript.jsonl
+│   └── README.md
+│
+├── config/                     # Cấu hình hệ thống & Lời nhắc
+│   ├── prompts/                # Prompt Registry (YAML/JSON)
+│   │   ├── template_parser.yaml   # Prompt đọc biểu mẫu để sinh Schema động
+│   │   ├── raw_extractor.yaml     # Prompt trích xuất dữ liệu có định hướng
+│   │   └── report_commenter.yaml  # Prompt viết văn cảnh nhận định dựa trên RAG
+│   └── settings.py             # Cấu hình API key, Model endpoint, Thư mục chứa
+│
+├── data/                       # Dữ liệu của hệ thống
+│   ├── chuan_hoa_hop_nhat/     # Master Data cấu hình quy chế
+│   │   ├── dm_don_vi/          # Danh mục hành chính GSO (.csv)
+│   │   ├── dm_phong_ban/       # Danh mục ID phòng ban phường (.csv)
+│   │   ├── report_schema.json  # Định nghĩa trường số liệu & từ đồng nghĩa
+│   │   └── validation_rules.json  # Biểu thức kiểm tra chéo số liệu
+│   ├── rag/                    # Cơ sở tri thức pháp luật phục vụ tra cứu
+│   │   ├── legal_docs/         # Luật, Nghị định, Thông tư dạng PDF/Word thô
+│   │   └── vector_db/          # Lưu trữ database vector (ChromaDB / FAISS)
+│   ├── templates/              # Thư mục lưu trữ biểu mẫu báo cáo trống đầu ra mẫu
+│   └── raw_inputs/             # Các tệp báo cáo thô đầu vào phục vụ chạy thử
+│   └── README.md
+│
+├── src/                        # Mã nguồn cốt lõi (Core Code của Agent)
+│   ├── __init__.py
+│   ├── agent.py                # Lớp Agent điều phối chính (Reasoning & Action Loop)
+│   ├── hooks/                  # Các Hook bảo mật biên (Security Guardrails)
+│   │   ├── anonymizer.py       # Hook ẩn danh PII (CCC/SĐT/Tên công dân)
+│   │   └── redaction.py        # Hook kiểm soát tài liệu thuộc danh mục Mật
+│   ├── tools/                  # Hộp công cụ hành động của Agent
+│   │   ├── doc_parser.py       # Excel/Word Parser, OCR đọc tài liệu thô
+│   │   ├── standardizer.py     # Fuzzy match chuẩn hóa địa bàn/phòng ban
+│   │   ├── rule_engine.py      # Bộ kiểm tra tính toán & logic số liệu
+│   │   └── rag_search.py       # Công cụ tìm kiếm Vector DB tri thức pháp luật
+│   └── memory/                 # Quản lý bộ nhớ tác tử
+│       ├── short_term.py       # Bộ nhớ ngữ cảnh phiên làm việc hiện tại
+│       └── long_term.py        # Bộ nhớ thói quen viết & các phản hồi cũ của cán bộ
+│
+├── app/                        # Giao diện người dùng cho Cán bộ & Lãnh đạo
+│   ├── app.py                  # Dashboard ứng dụng web (bằng Streamlit / FastAPI)
+│   └── assets/                 # Custom CSS, Logo giao diện
+│
+├── evaluation/                 # Bộ kiểm thử tự động của hệ thống
+│   ├── test_dataset/           # Ca kiểm thử (Dữ liệu thô + Báo cáo Ground Truth chuẩn)
+│   ├── run_eval.py             # Script tự động chạy tính điểm Accuracy, HER, Latency
+│   └── README.md
+│
+├── requirements.txt            # Danh sách thư viện Python cần cài đặt
+├── .gitignore                  # Cấu hình bỏ qua tệp của Git (đã cho phép tracking session)
+└── README.md                   # Tài liệu tổng quan bối cảnh, kiến trúc
+```
+
