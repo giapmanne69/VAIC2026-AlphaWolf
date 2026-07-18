@@ -204,44 +204,72 @@ Cơ chế bảo mật dữ liệu nhạy cảm và thông tin mật trước khi
 - **Redaction Hook (Kiểm soát thông tin mật):** Bộ lọc kiểm tra các từ khóa thuộc danh mục tài liệu mật (bí mật nhà nước, kế hoạch quốc phòng địa phương, ngân sách mật) để ngăn chặn rò rỉ dữ liệu ra ngoài phạm vi máy chủ nội bộ (On-premise).
 
 ## 6.4. Rules (Quy tắc tác tử)
-Các quy chế và ranh giới hoạt động quy định hành vi của tác tử:
-- Quy tắc kiểm tra tính hợp lệ số liệu bắt buộc (Error) và cảnh báo (Warning).
-- Quy trình phê duyệt có sự tham gia của con người (Human-in-the-loop) để kiểm duyệt báo cáo trước khi ký số.
+Các quy chế và ranh giới hoạt động quy định hành vi củ- Giao diện người dùng (Frontend & Backend): `React` + `Vite` + `TailwindCSS v4` (Giao diện thân thiện cán bộ trung niên) phối hợp cùng `FastAPI` Backend (Python API & Stream tư duy ReAct).
 
 ---
 
-# 7. Công nghệ đề xuất & Cấu hình Mô hình
+# 8. Hướng dẫn vận hành hệ thống (FastAPI + React)
 
-Hệ thống được cấu hình tối ưu để sử dụng các mô hình và thư viện mã nguồn mở chất lượng cao thông qua **API FPT AI Factory** và xử lý local:
+Hệ thống được thiết kế theo mô hình tách biệt Frontend - Backend phục vụ linh hoạt cho cả môi trường phát triển (Development) và môi trường vận hành chính thức (Production).
 
-- **Mô hình lập luận chính (Reasoning LLM):** `Llama-3.3-70B-Instruct` (Gọi qua API tương thích OpenAI của FPT AI Factory) - xử lý trích xuất số liệu, phân tích biểu mẫu động, và tự sửa sai số liệu (Self-Correction).
-- **Mô hình xử lý tài liệu quét/ảnh (Vision LLM):** `Qwen2.5-VL-7B-Instruct` - xử lý đọc trực tiếp bố cục văn bản, bảng biểu trên file PDF scan hoặc hình ảnh chụp không cần qua OCR truyền thống.
-- **Mô hình nhúng RAG (Embedding Model):** `multilingual-e5-large` (hoặc `Vietnamese_Embedding`) - biểu diễn ngữ nghĩa tri thức pháp luật.
-- **Mô hình xếp hạng lại (Reranker Model):** `bge-reranker-v2-m3` - tối ưu hóa kết quả tìm kiếm ngữ cảnh luật chính xác nhất.
-- **Cơ sở dữ liệu Vector (Vector Database):** `FAISS` (Local CPU-based, gọn nhẹ và miễn phí) - lưu trữ chỉ mục tri thức luật RAG.
-- **Xử lý tài liệu:** `python-docx` / `docxtpl` (Word template injection), `openpyxl` (Excel parser), `pdfplumber` (PDF parser), `pytesseract` (OCR).
-- Giao diện người dùng (Frontend & Backend): `React` + `Vite` + `TailwindCSS` (Giao diện thân thiện cán bộ trung niên) phối hợp cùng `FastAPI` Backend (Python API & Stream tư duy ReAct).
+## 8.1. Cài đặt môi trường Backend
+Cài đặt các thư viện Python cần thiết:
+```bash
+pip install -r requirements.txt
+```
 
----
-
----
-
-# 8. Mục tiêu
-
-Xây dựng một tác tử **Agentic AI** có khả năng tự động:
-
-- Thu thập dữ liệu từ nhiều nguồn.
-- Chuẩn hóa và hợp nhất số liệu.
-- Tính toán các chỉ tiêu quản trị.
-- Tra cứu quy định hiện hành bằng RAG.
-- Sinh báo cáo đúng mẫu của UBND.
-- Hỗ trợ lãnh đạo theo dõi tình hình và ra quyết định.
-
-Con người chủ yếu thực hiện kiểm duyệt và phê duyệt báo cáo cuối cùng.
+Khởi chạy máy chủ Backend (FastAPI):
+```bash
+uvicorn src.server:app --host 0.0.0.0 --port 8000
+```
+*API Swagger Docs sẽ được tự động kích hoạt tại địa chỉ: [http://localhost:8000/docs](http://localhost:8000/docs)*
 
 ---
 
-# 9. Cấu trúc thư mục dự án
+## 8.2. Vận hành Frontend (React + Vite)
+
+### Chế độ phát triển (Development Mode)
+Khi cần phát triển, sửa đổi mã nguồn React, chạy dev server với tính năng HMR (Hot Module Replacement):
+```bash
+cd frontend
+npm install
+npm run dev
+```
+*Giao diện Dev sẽ mở tại địa chỉ: [http://localhost:5173/](http://localhost:5173/). Mọi yêu cầu gọi `/api/*` sẽ được tự động proxy sang cổng `8000` của Backend.*
+
+### Chế độ vận hành chính thức (Production Mode)
+Để đóng gói gọn nhẹ và phân phối trực tiếp thông qua FastAPI mà không cần chạy máy chủ node độc lập:
+1. Biên dịch dự án React:
+   ```bash
+   cd frontend
+   npm run build
+   ```
+   *Kết quả biên dịch sẽ nằm trong thư mục `frontend/dist`.*
+2. Đồng bộ tệp tĩnh vào Backend (FastAPI sẽ phục vụ thư mục này):
+   * Sao chép tất cả nội dung trong thư mục `frontend/dist` vào `src/static`.
+   * Truy cập giao diện trực tiếp tại: **[http://localhost:8000/](http://localhost:8000/)**
+
+---
+
+# 9. Dữ liệu & Kịch bản kiểm thử (Test Samples)
+
+Để hỗ trợ kiểm duyệt nhanh chóng luồng làm việc tự trị của AI Agent, dự án cung cấp thư mục chứa dữ liệu mẫu tại:
+📁 [data/test_samples/](file:///e:/Project/VAIC_Project/data/test_samples)
+
+Bộ dữ liệu mẫu bao gồm:
+1. **Biểu mẫu đầu ra trống**: [1_bieu_mau_chuan.docx](file:///e:/Project/VAIC_Project/data/test_samples/1_bieu_mau_chuan.docx) (chứa các thẻ Jinja của chỉ tiêu kinh tế, hộ tịch, an ninh và ô nhận xét AI).
+2. **Số liệu tài chính**: [2_bao_cao_kinh_te.xlsx](file:///e:/Project/VAIC_Project/data/test_samples/2_bao_cao_kinh_te.xlsx) (Excel chứa tổng thu chi ngân sách).
+3. **Số liệu hộ tịch**: [3_bao_cao_tu_phap.docx](file:///e:/Project/VAIC_Project/data/test_samples/3_bao_cao_tu_phap.docx) (báo cáo Word ghi nhận đăng ký khai sinh, khai tử, chứng thực).
+4. **Số liệu an ninh**: [4_bao_cao_an_ninh.docx](file:///e:/Project/VAIC_Project/data/test_samples/4_bao_cao_an_ninh.docx) (báo cáo Word về tình hình an ninh trật tự, tạm trú).
+
+### Kịch bản chạy thử:
+* **Bước 1**: Truy cập `http://localhost:8000/`, nạp file biểu mẫu số 1 và 3 file báo cáo số 2, 3, 4.
+* **Bước 2**: Nhấp **Khởi chạy Tác tử AI**, quan sát logs ReAct AI phân tích và kiểm lỗi chéo.
+* **Bước 3**: Chỉnh sửa thử số liệu/nhận xét trên UI và nhấn **Tải báo cáo Word** để xuất bản chính thức.
+
+---
+
+# 10. Cấu trúc thư mục dự án
 
 ```text
 VAIC_Project/
@@ -269,13 +297,15 @@ VAIC_Project/
 │   │   ├── legal_docs/         # Luật, Nghị định, Thông tư dạng PDF/Word thô
 │   │   └── vector_db/          # Lưu trữ database vector (ChromaDB / FAISS)
 │   ├── templates/              # Thư mục lưu trữ biểu mẫu báo cáo trống đầu ra mẫu
-│   └── raw_inputs/             # Các tệp báo cáo thô đầu vào phục vụ chạy thử
+│   ├── raw_inputs/             # Các tệp báo cáo thô đầu vào phục vụ chạy thử
+│   ├── test_samples/           # [NEW] Thư mục chứa bộ dữ liệu mẫu dùng để chạy thử UI
 │   └── README.md
 │
 ├── src/                        # Mã nguồn cốt lõi (Core Code của Agent)
 │   ├── __init__.py
 │   ├── agent.py                # Lớp Agent điều phối chính (ReAct Loop & Tool Registry)
 │   ├── server.py               # FastAPI Backend (RESTful APIs & SSE Event Stream)
+│   ├── static/                 # Thư mục chứa tài nguyên React đã được biên dịch để phục vụ static
 │   ├── hooks/                  # Các Hook bảo mật biên (Security Guardrails)
 │   │   ├── anonymizer.py       # Hook ẩn danh PII (CCC/SĐT/Tên công dân)
 │   │   └── redaction.py        # Hook kiểm soát tài liệu thuộc danh mục Mật
@@ -292,9 +322,10 @@ VAIC_Project/
 │   ├── app.py                  # Dashboard ứng dụng web Streamlit
 │   └── assets/                 # Custom CSS, Logo giao diện
 │
-├── frontend/                   # [NEW] Giao diện người dùng React (Vite + TailwindCSS + Lucide Icons)
+├── frontend/                   # [NEW] Thư mục mã nguồn React (Vite + TailwindCSS + Lucide Icons)
 │   ├── src/                    # Mã nguồn React components & pages
-│   └── package.json            # Cấu hình dependencies frontend
+│   ├── package.json            # Cấu hình dependencies frontend
+│   └── vite.config.js          # Cấu hình Vite & API Proxy
 │
 ├── evaluation/                 # Bộ kiểm thử tự động của hệ thống
 │   ├── test_dataset/           # Ca kiểm thử (Dữ liệu thô + Báo cáo Ground Truth chuẩn)
