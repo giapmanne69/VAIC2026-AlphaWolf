@@ -115,16 +115,62 @@ Truy xuất thông tin pháp lý và biểu mẫu chuẩn làm căn cứ viết 
 
 - Unified KPI Dataset
 
-## Xử lý (Agentic Mechanism)
+## Xử lý (Agentic Mechanism - Pipeline 2)
 
-- Tác tử chủ động lập luận dựa trên kết quả số liệu:
-  - Nếu số liệu bình thường: Tác tử bỏ qua hoặc hạn chế gọi RAG pháp luật để tối ưu tốc độ.
-  - Nếu số liệu có biến động bất thường hoặc giảm sút KPI: Tác tử tự tạo câu truy vấn và gọi **RAG Search Tool** để tìm các điều luật, quy định xử lý từ Vector DB làm căn cứ giải trình.
-  - Tác tử truy xuất mẫu cấu trúc báo cáo cần điền.
+Đây là quy trình khi Tác tử kích hoạt **RAG Search Tool** để tra cứu tri thức giải trình báo cáo:
+
+```text
+Người dùng đưa yêu cầu (hoặc Agent tự nhận thức)
+                     │
+                     ▼
+            Agent phân tích nhiệm vụ
+                     │
+                     ▼
+       Agent xác định có cần RAG không
+                     │
+                     ▼
+          Tạo câu truy vấn cho RAG
+                     │
+                     ▼
+             Lọc theo Metadata
+                     │
+                     ▼
+               Hybrid Search
+                     │
+                     ▼
+           Lấy các chunk phù hợp
+                     │
+                     ▼
+                 Reranking
+                     │
+                     ▼
+           Chọn các đoạn tốt nhất
+                     │
+                     ▼
+               Ghép thành Context
+                     │
+                     ▼
+              Đưa Context cho LLM
+                     │
+                     ▼
+        LLM viết câu trả lời / báo cáo
+                     │
+                     ▼
+         Kiểm tra nguồn và trích dẫn
+                     │
+                     ▼
+            Trả kết quả cho Agent
+```
+
+Chi tiết luồng thực thi:
+1. **Lập luận gọi RAG:** Tác tử phân tích chỉ số KPI nhận được. Nếu phát hiện chỉ số bất thường hoặc theo yêu cầu viết báo cáo chuyên đề của cán bộ, Tác tử quyết định kích hoạt công cụ `RAG Search Tool`.
+2. **Xây dựng Query & Lọc:** Tác tử tự dịch nhu cầu phân tích thành câu truy vấn nghiệp vụ tối ưu và áp dụng bộ lọc Metadata (ví dụ: chỉ tìm trong `Luật Khiếu nại` đối với lỗi liên quan đến Đơn thư).
+3. **Tìm kiếm & Rerank:** Tìm kiếm kết hợp (Hybrid Search: Vector Search + Keyword Search). Sau đó sử dụng mô hình Reranker (`bge-reranker-v2-m3`) để xếp hạng lại, lấy ra top các đoạn văn bản luật chất lượng nhất.
+4. **Đổ ngữ cảnh cho LLM:** Gắn thông tin luật và các nguồn trích dẫn tương ứng vào Context để LLM tham chiếu viết phần nhận xét, đảm bảo tính pháp lý tuyệt đối cho văn bản hành chính công.
 
 ## Output
 
-- Legal Context & Report Layout
+- Legal Context (Ngữ cảnh pháp lý được trích dẫn chính xác nguồn)
 
 ---
 

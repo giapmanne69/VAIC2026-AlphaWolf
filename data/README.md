@@ -130,12 +130,50 @@ Do hệ thống tập trung vào 03 lĩnh vực chính, dữ liệu RAG được
 - UBND cấp Huyện/Quận chủ quản
 - UBND cấp Tỉnh/Thành phố
 
-## Cách lấy dữ liệu
+## Cách lấy dữ liệu & Tiền xử lý (Pipeline 1)
 
-- Thu thập văn bản điện tử và các mẫu báo cáo trống (.docx, .xlsx, .pdf)
-- Chuyển đổi các biểu mẫu báo cáo sang dạng tài liệu cấu trúc (Report Templates) và Schema
-- Chunking và Embedding các văn bản hướng dẫn quy trình nghiệp vụ
-- Lưu trữ trong Vector Database để phục vụ tra cứu ngữ cảnh khi viết báo cáo
+Quy trình tiền xử lý và xây dựng hệ cơ sở tri thức (Knowledge Base) phục vụ RAG:
+
+```text
+Tài liệu Knowledge Base
+        │
+        ▼
+Phân loại tài liệu
+        │
+        ▼
+  Parser / OCR
+        │
+        ▼
+Làm sạch nội dung
+        │
+        ▼
+Phân tích cấu trúc tài liệu
+        │
+        ▼
+Chia thành các đoạn nhỏ
+   (Chunking)
+        │
+        ▼
+  Gắn Metadata
+        │
+        ▼
+  Tạo Embedding
+        │
+        ▼
+Lưu vào Vector Database
+        │
+        ▼
+Tạo chỉ mục tìm kiếm
+        │
+        ▼
+Knowledge Base sẵn sàng
+```
+
+Các bước thực hiện chính:
+- **Thu thập:** Gom các văn bản quy định hành chính, thông tư, nghị định và hướng dẫn của 03 lĩnh vực (Dân cư, Khiếu nại, KPI).
+- **Trích xuất (Parser/OCR):** Sử dụng các thư viện chuyển đổi văn bản hoặc công cụ OCR đối với các tài liệu quét.
+- **Làm sạch & Chia nhỏ (Chunking):** Định dạng lại văn bản sạch sẽ và chia nhỏ theo cấu trúc điều/khoản để đảm bảo không bị mất ngữ nghĩa.
+- **Embedding & Vector Storage:** Sử dụng mô hình nhúng (`multilingual-e5-large`) chuyển hóa văn bản thành vector và lưu trữ vào ChromaDB/FAISS kèm metadata (tên văn bản, điều luật) phục vụ tìm kiếm chính xác.
 
 ---
 
