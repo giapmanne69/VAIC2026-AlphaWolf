@@ -8,6 +8,12 @@ import streamlit as st
 import json
 import tempfile
 import pandas as pd
+import io
+import logging
+from docxtpl import DocxTemplate
+
+# Khởi tạo logger cho Frontend
+logger = logging.getLogger("StreamlitApp")
 
 # Thiết lập cấu hình trang Streamlit (phải ở dòng đầu tiên)
 st.set_page_config(
@@ -84,6 +90,27 @@ if "agent" not in st.session_state:
 
 agent = st.session_state.agent
 
+# --- HELPER: RENDER WORD IN-MEMORY (TRÁNH LỖI FILE TRỐNG) ---
+def render_docx_in_memory(template_bytes: bytes, kpi_data: dict, remarks: str) -> bytes:
+    """
+    Render biểu mẫu Word trực tiếp trên bộ nhớ RAM để đảm bảo tính đồng bộ dữ liệu
+    và cho phép cập nhật tức thì các chỉnh sửa thủ công của cán bộ (Human-in-the-loop).
+    """
+    try:
+        doc = DocxTemplate(io.BytesIO(template_bytes))
+        context = kpi_data.copy()
+        context["nhan_xet_ai"] = remarks
+        
+        logger.info(f"Đang render Word trực tiếp trên bộ nhớ với {len(kpi_data)} chỉ số.")
+        doc.render(context)
+        
+        output_stream = io.BytesIO()
+        doc.save(output_stream)
+        return output_stream.getvalue()
+    except Exception as e:
+        logger.exception("Lỗi khi render biểu mẫu Word trong bộ nhớ:")
+        raise e
+
 # --- SIDEBAR: CẤU HÌNH HỆ THỐNG ---
 st.sidebar.markdown("<h2 style='font-weight:800;'>⚙️ CẤU HÌNH AI</h2>", unsafe_allow_html=True)
 st.sidebar.info("Hệ thống đang cấu hình chạy trực tiếp với mô hình Llama-3.3-70B-Instruct thông qua FPT AI Factory API.")
@@ -95,6 +122,7 @@ model_name = st.sidebar.text_input("LLM Model Name", value=settings.LLM_MODEL)
 if api_key != settings.FPT_API_KEY:
     settings.FPT_API_KEY = api_key
     agent.client.api_key = api_key
+    logger.info("Cập nhật FPT_API_KEY từ sidebar.")
 
 # --- MÀN HÌNH CHÍNH ---
 st.markdown("<h1 class='title-gradient'>🏛️ UBND Phường - Agentic AI Report Hub</h1>", unsafe_allow_html=True)
@@ -120,7 +148,7 @@ with col_upload:
         help="Tải lên báo cáo thô của Tư pháp, Một cửa, Địa chính, Công an... định dạng Word, Excel, PDF hoặc ảnh chụp."
     )
     
-    # 3. Custom RAG Context input (Cho phép cán bộ nhập/stubs tài liệu luật pháp thủ công do chưa có DB)
+    # 3. Custom RAG Context input
     st.markdown("---")
     st.markdown("#### 📖 Tri thức luật bổ sung (RAG)")
     rag_context = st.text_area(
@@ -131,21 +159,25 @@ with col_upload:
 
 with col_process:
     st.markdown("### ⚙️ Tiến trình trích xuất & Sinh báo cáo")
+    
     if not template_file or not raw_files:
         st.warning("Vui lòng tải lên đầy đủ file biểu mẫu trống và ít nhất 1 báo cáo thô để bắt đầu.")
     else:
         if st.button("🚀 BẮT ĐẦU XỬ LÝ REPORT PIPELINE", type="primary", width="stretch"):
+            logger.info("--- BẮT ĐẦU CHẠY PIPELINE TRÍCH XUẤT ---")
             
-            # Sử dụng thư mục tạm thời để xử lý file tải lên
+            # Lưu trữ file bytes của template vào session state
+            st.session_state.template_bytes = template_file.getvalue()
+            st.session_state.output_file_name = f"Bao_cao_tong_hop_{Path(template_file.name).stem}.docx"
+            
+            # Sử dụng thư mục tạm thời để lưu file vật lý chạy Parser
             with tempfile.TemporaryDirectory() as tmp_dir:
                 tmp_dir_path = Path(tmp_dir)
                 
-                # Lưu file template
                 temp_template_path = tmp_dir_path / template_file.name
                 with open(temp_template_path, "wb") as f:
-                    f.write(template_file.getbuffer())
+                    f.write(st.session_state.template_bytes)
                 
-                # Lưu các file thô
                 temp_raw_paths = []
                 for rf in raw_files:
                     path = tmp_dir_path / rf.name
@@ -153,99 +185,98 @@ with col_process:
                         f.write(rf.getbuffer())
                     temp_raw_paths.append(str(path))
                 
-                # --- STAGE 1: Phân tích biểu mẫu mẫu ---
-                with st.status("🔍 Stage 1: Đang quét cấu hình biểu mẫu mẫu trống...", expanded=True) as status:
-                    st.write("Đang đọc file biểu mẫu...")
-                    schema = agent.parse_template_schema(str(temp_template_path))
-                    st.write("Đã phát hiện Schema các chỉ tiêu cần điền:")
-                    st.json(schema)
-                    status.update(label="Stage 1: Hoàn tất phân tích biểu mẫu!", state="complete")
-                
-                # --- STAGE 2 & 3: Trích xuất và bảo mật thông tin ---
-                with st.status("🛡️ Stage 2 & 3: Đang ẩn danh PII và trích xuất số liệu...", expanded=True) as status:
-                    st.write("Đang quét từ khóa nhạy cảm (Redaction Hook)...")
-                    st.write("Đang che giấu thông tin cá nhân (Anonymizer Hook)...")
-                    st.write("Đang gửi LLM trích xuất số liệu thô...")
-                    raw_data = agent.extract_from_raw_inputs(schema, temp_raw_paths)
-                    st.write("Dữ liệu trích xuất thô thu được:")
-                    st.json(raw_data)
-                    status.update(label="Stage 2 & 3: Hoàn tất trích xuất và bảo mật!", state="complete")
-                
-                # --- STAGE 4: Chạy Rule Engine và tự sửa lỗi ---
-                with st.status("🧮 Stage 4: Đang kiểm tra logic số liệu chéo...", expanded=True) as status:
-                    st.write("Chạy kiểm tra quy tắc validation_rules.json...")
-                    final_data, failures = agent.run_validation_and_self_correction(raw_data)
+                try:
+                    # --- STAGE 1: Phân tích biểu mẫu mẫu ---
+                    with st.status("🔍 Stage 1: Đang quét cấu hình biểu mẫu mẫu trống...", expanded=True) as status:
+                        schema = agent.parse_template_schema(str(temp_template_path))
+                        st.write("Schema chỉ tiêu phát hiện được:")
+                        st.json(schema)
+                        status.update(label="Stage 1: Hoàn tất!", state="complete")
                     
-                    if not failures:
-                        st.markdown("<span class='status-badge-pass'>PASS</span> Không phát hiện mâu thuẫn số liệu.", unsafe_allow_html=True)
-                    else:
-                        st.write("Kết quả kiểm tra chéo:")
-                        for fail in failures:
-                            status_badge = "FAIL (ERROR)" if fail["severity"] == "error" else "WARNING"
-                            badge_class = "status-badge-fail" if fail["severity"] == "error" else "status-badge-pass"
-                            st.markdown(
-                                f"- <span class='{badge_class}'>{status_badge}</span> **{fail['id']}**: {fail['description']}<br>"
-                                f"  *Công thức: `{fail['formula']}` (Trạng thái: {fail['error_msg']})*", 
-                                unsafe_allow_html=True
-                            )
+                    # --- STAGE 2 & 3: Trích xuất số liệu ---
+                    with st.status("🛡️ Stage 2 & 3: Đang ẩn danh PII và trích xuất số liệu...", expanded=True) as status:
+                        raw_data = agent.extract_from_raw_inputs(schema, temp_raw_paths)
+                        st.write("Dữ liệu trích xuất:")
+                        st.json(raw_data)
+                        status.update(label="Stage 2 & 3: Hoàn tất!", state="complete")
                     
-                    status.update(label="Stage 4: Kiểm lỗi hoàn tất!", state="complete")
-                
-                # --- STAGE 6: Sinh nhận định và ghi tệp Word ---
-                with st.status("📝 Stage 6: Đang sinh đoạn văn nhận định & điền mẫu...", expanded=True) as status:
-                    st.write("Đang tìm kiếm cơ sở pháp lý (RAG stubs)...")
-                    st.write("Đang gọi Llama-3.3 viết nhận định hành chính...")
+                    # --- STAGE 4: Kiểm chéo và tự sửa lỗi ---
+                    with st.status("🧮 Stage 4: Đang kiểm tra logic số liệu chéo...", expanded=True) as status:
+                        final_data, failures = agent.run_validation_and_self_correction(raw_data)
+                        
+                        if not failures:
+                            st.markdown("<span class='status-badge-pass'>PASS</span> Không phát hiện lỗi logic.", unsafe_allow_html=True)
+                        else:
+                            for fail in failures:
+                                status_badge = "FAIL (ERROR)" if fail["severity"] == "error" else "WARNING"
+                                badge_class = "status-badge-fail" if fail["severity"] == "error" else "status-badge-pass"
+                                st.markdown(
+                                    f"- <span class='{badge_class}'>{status_badge}</span> **{fail['id']}**: {fail['description']}<br>"
+                                    f"  *Công thức: `{fail['formula']}` ({fail['error_msg']})*", 
+                                    unsafe_allow_html=True
+                                )
+                        status.update(label="Stage 4: Kiểm lỗi hoàn tất!", state="complete")
                     
-                    # Tạo file output tạm
-                    output_file_name = f"Bao_cao_tong_hop_{Path(template_file.name).stem}.docx"
-                    temp_output_path = Path(settings.DATA_DIR) / "output_reports" / output_file_name
-                    
-                    remarks = agent.generate_final_report(
-                        kpi_data=final_data,
-                        template_path=str(temp_template_path),
-                        output_path=str(temp_output_path),
-                        rag_context=rag_context
-                    )
-                    st.write("Nhận định do AI viết:")
-                    st.info(remarks)
-                    
-                    # Lưu trữ các biến vào session state để tải về
-                    st.session_state.final_remarks = remarks
-                    st.session_state.final_kpi = final_data
-                    st.session_state.output_path_str = str(temp_output_path)
-                    st.session_state.output_file_name = output_file_name
-                    
-                    status.update(label="Stage 6: Hoàn thành sinh báo cáo!", state="complete")
-                    
-                st.balloons()
+                    # --- STAGE 6: Sinh nhận định ---
+                    with st.status("📝 Stage 6: Đang sinh đoạn văn nhận định...", expanded=True) as status:
+                        # Sinh nhận xét thô bằng LLM và lưu vào bộ nhớ
+                        remarks = agent.generate_final_report(
+                            kpi_data=final_data,
+                            template_path=str(temp_template_path),
+                            output_path=str(tmp_dir_path / "mock.docx"), # Chỉ ghi file mock thô
+                            rag_context=rag_context
+                        )
+                        st.write("Nhận định từ LLM:")
+                        st.info(remarks)
+                        
+                        # Lưu trữ kết quả trích xuất vào Session State
+                        st.session_state.final_remarks = remarks
+                        st.session_state.final_kpi = final_data
+                        
+                        status.update(label="Stage 6: Hoàn tất sinh nhận định!", state="complete")
+                        
+                    st.balloons()
+                    logger.info("Pipeline trích xuất báo cáo chạy thành công.")
+                except Exception as e:
+                    logger.exception("Lỗi xảy ra trong quá trình chạy Report Pipeline:")
+                    st.error(f"Đã xảy ra lỗi nghiêm trọng: {str(e)}. Xem chi tiết tại data/agent_execution.log")
 
-        # Hiển thị kết quả tải về nếu báo cáo đã được sinh ra thành công
-        if "output_path_str" in st.session_state and Path(st.session_state.output_path_str).exists():
+        # Màn hình kết quả khi dữ liệu đã sẵn sàng trong session state
+        if "final_kpi" in st.session_state and "template_bytes" in st.session_state:
             st.markdown("---")
-            st.markdown("### 🏆 Báo cáo đã hoàn thành!")
+            st.markdown("### 🏆 Báo cáo đã sẵn sàng tải về")
             
-            # Cho phép cán bộ sửa trực tiếp văn bản AI nhận xét (Human-in-the-loop)
+            # Khung Human-in-the-loop cho phép sửa trực tiếp nhận xét
             st.markdown("#### 🖊️ Hiệu chỉnh nhận xét tự động (Human-in-the-loop)")
             user_edited_remarks = st.text_area(
-                "Bạn có thể tinh chỉnh lại đoạn văn nhận định bên dưới. Mọi chỉnh sửa sẽ được lưu vào bộ nhớ thói quen để AI tự học hỏi cho lần sau:",
+                "Bạn có thể tinh chỉnh đoạn văn dưới đây. File Word tải xuống sẽ tự động cập nhật theo nội dung mới này:",
                 value=st.session_state.final_remarks,
                 height=150
             )
             
-            # Ghi nhận chỉnh sửa của cán bộ vào LongTermMemory nếu có thay đổi
+            # Đồng bộ chỉnh sửa vào bộ nhớ dài hạn
             if user_edited_remarks != st.session_state.final_remarks:
                 agent.long_memory.add_style_preference("user_adjusted_remarks", user_edited_remarks)
-                st.toast("Đã lưu thói quen chỉnh sửa của cán bộ vào bộ nhớ dài hạn!", icon="🧠")
+                st.session_state.final_remarks = user_edited_remarks
+                st.toast("Đã lưu thói quen chỉnh sửa và cập nhật tệp tải về!", icon="🧠")
+            
+            # RENDER TRÊN BỘ NHỚ RAM TRƯỚC KHI TẢI VỀ
+            try:
+                docx_bytes = render_docx_in_memory(
+                    template_bytes=st.session_state.template_bytes,
+                    kpi_data=st.session_state.final_kpi,
+                    remarks=st.session_state.final_remarks
+                )
                 
-            # Nút tải file báo cáo Word
-            with open(st.session_state.output_path_str, "rb") as f:
-                btn = st.download_button(
+                st.download_button(
                     label="📥 Tải xuống báo cáo hoàn chỉnh (.docx)",
-                    data=f,
+                    data=docx_bytes,
                     file_name=st.session_state.output_file_name,
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     width="stretch"
                 )
+            except Exception as e:
+                st.error(f"Lỗi khi xuất tệp báo cáo: {str(e)}")
             
             # Bảng tổng hợp số liệu trích xuất chuẩn hóa
             st.markdown("#### 📊 Bảng số liệu trích xuất chuẩn hóa:")
