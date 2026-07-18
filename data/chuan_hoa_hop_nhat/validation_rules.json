@@ -28,7 +28,7 @@
     {
       "id": "RULE_TTHC_01",
       "description": "Tỷ lệ giải quyết đúng hạn phải bằng (ho_so_dung_han / ho_so_da_giai_quyet) * 100",
-      "formula": "abs(ty_le_dung_han - (ho_so_dung_han / ho_so_da_giai_quyet) * 100) < 0.1",
+      "formula": "ho_so_da_giai_quyet == 0 or abs(ty_le_dung_han - (ho_so_dung_han / ho_so_da_giai_quyet) * 100) < 0.1",
       "severity": "warning"
     },
     {
