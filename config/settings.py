@@ -10,6 +10,9 @@ load_dotenv(BASE_DIR / ".env")
 FPT_API_KEY = os.getenv("FPT_API_KEY", "YOUR_FPT_API_KEY_HERE")
 FPT_BASE_URL = os.getenv("FPT_BASE_URL", "https://api.fpt.ai/v1")  # Cần cập nhật đúng endpoint của FPT AI Factory
 LLM_MODEL = os.getenv("LLM_MODEL", "Llama-3.3-70B-Instruct")
+VISION_MODEL = os.getenv("VISION_MODEL", "Qwen2.5-VL-7B-Instruct")
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "multilingual-e5-large")
+RERANKER_MODEL = os.getenv("RERANKER_MODEL", "bge-reranker-v2-m3")
 
 # 2. Directory Configurations (Windows compatible paths)
 DATA_DIR = BASE_DIR / "data"
