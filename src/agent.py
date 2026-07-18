@@ -46,6 +46,12 @@ class AgenticReportAgent:
                 base_url=settings.FPT_BASE_URL
             )
             self.restore_maps = {}
+            self.agent_state = {
+                "schema": None,
+                "kpi_data": {},
+                "remarks": {},
+                "raw_text_cache": {}
+            }
             logger.info("Khởi tạo thành công OpenAI Client kết nối FPT AI Factory.")
         except Exception as e:
             logger.exception("Lỗi khi khởi tạo AgenticReportAgent:")
@@ -282,20 +288,21 @@ class AgenticReportAgent:
         
         if tool_name == "extract_schema_tool":
             template_path = tool_input.get("template_path")
-            return self.parse_template_schema(template_path)
+            schema = self.parse_template_schema(template_path)
+            self.agent_state["schema"] = schema
+            return schema
             
         elif tool_name == "read_and_clean_raw_tool":
             file_path = tool_input.get("file_path")
             raw_text = self.parser.parse(file_path)
             
-            # Kiểm soát từ khóa mật
             is_safe, found_secrets = self.redaction.is_safe(raw_text)
             if not is_safe:
                 raw_text = self.redaction.redact(raw_text)
                 
-            # Ẩn danh PII
             masked_text, restore_map = self.anonymizer.anonymize(raw_text)
             self.restore_maps[file_path] = restore_map
+            self.agent_state["raw_text_cache"]["masked_text"] = masked_text
             return {
                 "masked_text": masked_text,
                 "restore_map_len": len(restore_map),
@@ -303,8 +310,8 @@ class AgenticReportAgent:
             }
             
         elif tool_name == "extract_kpis_tool":
-            raw_text = tool_input.get("raw_text")
-            schema = tool_input.get("schema")
+            raw_text = tool_input.get("raw_text") or self.agent_state.get("raw_text_cache", {}).get("masked_text", "")
+            schema = tool_input.get("schema") or self.agent_state.get("schema", {})
             
             sys_p, user_p = self._load_prompt("raw_extractor.yaml")
             formatted_user_p = user_p.format(
@@ -314,7 +321,6 @@ class AgenticReportAgent:
             response = self._call_llm(sys_p, formatted_user_p, response_format="json")
             doc_data = json.loads(response)
             
-            # Khôi phục dữ liệu ẩn danh ngược lại từ restore maps
             for file_path, restore_map in self.restore_maps.items():
                 for k, v in list(doc_data.items()):
                     if isinstance(v, str):
@@ -322,7 +328,7 @@ class AgenticReportAgent:
             return doc_data
             
         elif tool_name == "validate_and_correct_tool":
-            kpi_data = tool_input.get("kpi_data")
+            kpi_data = tool_input.get("kpi_data") or self.agent_state.get("kpi_data", {})
             is_valid, failures = self.rule_engine.validate(kpi_data)
             return {"is_valid": is_valid, "failures": failures}
             
@@ -332,10 +338,9 @@ class AgenticReportAgent:
             return self.rag_search.retrieve_context(query, domain_filter=domain)
             
         elif tool_name == "generate_section_remarks_tool":
-            kpi_data = tool_input.get("kpi_data")
+            kpi_data = tool_input.get("kpi_data") or self.agent_state.get("kpi_data", {})
             sys_p, user_p = self._load_prompt("report_commenter.yaml")
             
-            # Tự động truy vấn RAG lấy ngữ cảnh pháp lý nếu chưa có
             effective_rag_context = rag_context
             if not effective_rag_context:
                 queries = ["chế độ báo cáo thông tư nghị định", "quy trình giải quyết khiếu nại tố cáo", "dân cư cư trú hộ tịch"]
@@ -355,8 +360,8 @@ class AgenticReportAgent:
             
         elif tool_name == "render_docx_report_tool":
             template_path = tool_input.get("template_path")
-            kpi_data = tool_input.get("kpi_data")
-            remarks_dict = tool_input.get("remarks_dict", {})
+            kpi_data = tool_input.get("kpi_data") or self.agent_state.get("kpi_data", {})
+            remarks_dict = tool_input.get("remarks_dict") or self.agent_state.get("remarks", {})
             output_path = tool_input.get("output_path")
             
             combined_remarks = (
@@ -412,7 +417,7 @@ class AgenticReportAgent:
         max_steps = 15
         
         # Biến số trạng thái toàn cục trong phiên chạy của Tác tử
-        agent_state = {
+        self.agent_state = {
             "schema": None,
             "kpi_data": {},
             "remarks": {},
@@ -427,7 +432,8 @@ class AgenticReportAgent:
                 response = self.client.chat.completions.create(
                     model=settings.LLM_MODEL,
                     messages=history,
-                    temperature=0.1
+                    temperature=0.1,
+                    max_tokens=4096
                 )
                 content = response.choices[0].message.content
                 logger.info(f"LLM phản hồi: \n{content}")
@@ -471,9 +477,9 @@ class AgenticReportAgent:
                 if not isinstance(final_answer, dict):
                     final_answer = {"status": "success", "message": str(final_answer)}
                 if "kpi_data" not in final_answer or not final_answer["kpi_data"]:
-                    final_answer["kpi_data"] = agent_state["kpi_data"]
+                    final_answer["kpi_data"] = self.agent_state["kpi_data"]
                 if "combined_remarks" not in final_answer or not final_answer["combined_remarks"]:
-                    rem = agent_state.get("remarks", {})
+                    rem = self.agent_state.get("remarks", {})
                     combined_remarks = (
                         f"=== KHỐI KINH TẾ ===\n{rem.get('nhan_xet_ai_kinh_te', '')}\n\n"
                         f"=== KHỐI VĂN HÓA - XÃ HỘI ===\n{rem.get('nhan_xet_ai_van_hoa_xa_hoi', '')}\n\n"
@@ -514,11 +520,11 @@ class AgenticReportAgent:
                     
                     # Cập nhật trạng thái Agent để theo dõi
                     if action == "extract_schema_tool":
-                        agent_state["schema"] = observation_result
+                        self.agent_state["schema"] = observation_result
                     elif action == "extract_kpis_tool":
-                        agent_state["kpi_data"].update(observation_result)
+                        self.agent_state["kpi_data"].update(observation_result)
                     elif action == "generate_section_remarks_tool":
-                        agent_state["remarks"] = observation_result
+                        self.agent_state["remarks"] = observation_result
                         
                     observation = json.dumps(observation_result, ensure_ascii=False)
                 except Exception as e:
