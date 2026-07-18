@@ -131,11 +131,10 @@ with col_upload:
 
 with col_process:
     st.markdown("### ⚙️ Tiến trình trích xuất & Sinh báo cáo")
-    
     if not template_file or not raw_files:
         st.warning("Vui lòng tải lên đầy đủ file biểu mẫu trống và ít nhất 1 báo cáo thô để bắt đầu.")
     else:
-        if st.button("🚀 BẮT ĐẦU XỬ LÝ REPORT PIPELINE", type="primary", use_container_width=True):
+        if st.button("🚀 BẮT ĐẦU XỬ LÝ REPORT PIPELINE", type="primary", width="stretch"):
             
             # Sử dụng thư mục tạm thời để xử lý file tải lên
             with tempfile.TemporaryDirectory() as tmp_dir:
@@ -245,12 +244,12 @@ with col_process:
                     data=f,
                     file_name=st.session_state.output_file_name,
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                    use_container_width=True
+                    width="stretch"
                 )
             
             # Bảng tổng hợp số liệu trích xuất chuẩn hóa
             st.markdown("#### 📊 Bảng số liệu trích xuất chuẩn hóa:")
             kpi_df = pd.DataFrame(
-                [{"Chỉ số": k, "Giá trị trích xuất": v} for k, v in st.session_state.final_kpi.items()]
+                [{"Chỉ số": k, "Giá trị trích xuất": str(v) if v is not None else ""} for k, v in st.session_state.final_kpi.items()]
             )
-            st.dataframe(kpi_df, use_container_width=True)
+            st.dataframe(kpi_df, width="stretch")
