@@ -468,9 +468,69 @@ class RAGSearchTool:
             
         return expanded
 
+    def rerank_documents(self, query: str, candidates: List[Dict[str, Any]], top_k: int = 4) -> List[Dict[str, Any]]:
+        """
+        Gọi FPT Reranker API (bge-reranker-v2-m3) để xếp hạng lại các ứng viên.
+        """
+        import requests
+        
+        if not candidates:
+            return []
+            
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {settings.FPT_API_KEY}"
+        }
+        
+        # Chuẩn bị danh sách văn bản của các ứng viên
+        doc_texts = [item["chunk"]["content"] for item in candidates]
+        
+        payload = {
+            "model": settings.RERANKER_MODEL,
+            "query": query,
+            "documents": doc_texts,
+            "top_n": top_k
+        }
+        
+        # Gọi trực tiếp qua endpoint /v1/rerank của FPT Cloud AI Factory
+        url = f"{settings.FPT_BASE_URL.rstrip('/')}/v1/rerank"
+        try:
+            logger.info(f"Đang gọi FPT Reranker API ({settings.RERANKER_MODEL}) cho {len(candidates)} ứng viên...")
+            response = requests.post(url, headers=headers, json=payload, timeout=10)
+            if response.status_code == 200:
+                result = response.json()
+                results_list = result.get("results", [])
+                if not results_list and isinstance(result, list):
+                    results_list = result
+                    
+                reranked_results = []
+                for res in results_list:
+                    idx = res.get("index")
+                    if idx is not None and 0 <= idx < len(candidates):
+                        cand = candidates[idx].copy()
+                        cand["score"] = res.get("relevance_score", cand["score"])
+                        reranked_results.append(cand)
+                
+                # Cơ chế dự phòng nếu số lượng trả về không đủ
+                if len(reranked_results) < top_k and len(candidates) > len(reranked_results):
+                    used_indices = {res.get("index") for res in results_list if res.get("index") is not None}
+                    for idx, cand in enumerate(candidates):
+                        if idx not in used_indices:
+                            reranked_results.append(cand)
+                            
+                return reranked_results[:top_k]
+            else:
+                logger.error(f"Lỗi phản hồi FPT Reranker API (Status: {response.status_code}): {response.text}")
+        except Exception as e:
+            logger.exception("Lỗi khi kết nối FPT Reranker API:")
+            
+        # Fallback về thứ tự gốc của RRF nếu API lỗi
+        return candidates[:top_k]
+
     def search_hybrid(self, query: str, top_k: int = 4, domain_filter: str = None) -> List[Dict[str, Any]]:
         """
-        Pipeline 2 Core: Hybrid Search kết hợp Dense + Lexical (BM25) sử dụng Reciprocal Rank Fusion (RRF).
+        Pipeline 2 Core: Hybrid Search kết hợp Dense + Lexical (BM25) sử dụng Reciprocal Rank Fusion (RRF),
+        sau đó được xếp hạng lại (Rerank) thông qua mô hình bge-reranker-v2-m3 của FPT AI Factory.
         """
         if not self.chunks or self.vectors.size == 0:
             logger.info("Index rỗng. Tiến hành build index...")
@@ -513,15 +573,18 @@ class RAGSearchTool:
         sorted_rrf = sorted(rrf_scores.items(), key=lambda x: -x[1])
         
         candidates = []
-        for cid, score in sorted_rrf[:top_k]:
+        for cid, score in sorted_rrf[:15]:  # Lấy top 15 ứng viên để chuyển sang Reranker
             candidates.append({
                 "chunk_id": cid,
                 "score": score,
                 "chunk": chunks_map[cid]
             })
             
-        # 4. Mở rộng ngữ cảnh cha (Parent Context Expansion)
-        expanded_candidates = self.expand_parent_context(candidates)
+        # 4. Gọi FPT Reranker API để tối ưu hóa thứ tự
+        reranked_candidates = self.rerank_documents(query, candidates, top_k=top_k)
+            
+        # 5. Mở rộng ngữ cảnh cha (Parent Context Expansion)
+        expanded_candidates = self.expand_parent_context(reranked_candidates)
         return expanded_candidates
 
     def search(self, query: str, top_k: int = 4, domain_filter: str = None) -> List[Dict[str, Any]]:
