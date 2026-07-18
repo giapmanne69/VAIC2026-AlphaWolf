@@ -220,11 +220,38 @@ class AgenticReportAgent:
             if style_str:
                 formatted_user_p += style_str
     
-            remarks = self._call_llm(sys_p, formatted_user_p)
+            # Gọi LLM với định dạng JSON
+            response_text = self._call_llm(sys_p, formatted_user_p, response_format="json")
+            try:
+                remarks_dict = json.loads(response_text)
+            except Exception as e:
+                logger.error(f"Không thể parse JSON từ phản hồi nhận xét. Thử dùng text thô làm mặc định: {str(e)}")
+                remarks_dict = {
+                    "nhan_xet_ai_kinh_te": response_text,
+                    "nhan_xet_ai_van_hoa_xa_hoi": response_text,
+                    "nhan_xet_ai_quoc_phong_an_ninh": response_text,
+                    "nhan_xet_ai_phuong_huong": response_text
+                }
+            
+            # Gom tất cả nhận xét thành 1 văn bản để hiển thị ở UI
+            combined_remarks = (
+                f"=== KHỐI KINH TẾ ===\n{remarks_dict.get('nhan_xet_ai_kinh_te', '')}\n\n"
+                f"=== KHỐI VĂN HÓA - XÃ HỘI ===\n{remarks_dict.get('nhan_xet_ai_van_hoa_xa_hoi', '')}\n\n"
+                f"=== KHỐI QUỐC PHÒNG - AN NINH ===\n{remarks_dict.get('nhan_xet_ai_quoc_phong_an_ninh', '')}\n\n"
+                f"=== PHƯƠNG HƯỚNG KỲ TỚI ===\n{remarks_dict.get('nhan_xet_ai_phuong_huong', '')}"
+            )
             
             # Gộp ngữ cảnh và ghi tệp Word
             render_context = kpi_data.copy()
-            render_context["nhan_xet_ai"] = remarks
+            
+            # Sửa lỗi in chữ None/null ra file Word
+            for k, v in list(render_context.items()):
+                if v is None or v == "None" or v == "null":
+                    render_context[k] = ""
+                    
+            # Đưa toàn bộ các nhận xét riêng lẻ vào ngữ cảnh render
+            render_context.update(remarks_dict)
+            render_context["nhan_xet_ai"] = combined_remarks
             
             logger.info(f"Đang tiến hành điền mẫu với docxtpl...")
             doc = DocxTemplate(template_path)
@@ -235,7 +262,7 @@ class AgenticReportAgent:
             doc.save(out_path)
             
             logger.info(f"Lưu file Word thành công tại: {out_path}")
-            return remarks
+            return combined_remarks
         except Exception as e:
             logger.exception("Lỗi trong Stage 6 (generate_final_report):")
             raise e

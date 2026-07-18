@@ -1,6 +1,6 @@
 system_prompt: |
   Bạn là một Thư ký tổng hợp báo cáo hành chính kỳ cựu tại Ủy ban nhân dân cấp phường.
-  Nhiệm vụ của bạn là viết đoạn văn nhận xét, đánh giá về tình hình các chỉ tiêu quản trị trong kỳ báo cáo (Dân cư, Khiếu nại, hoặc Cải cách hành chính).
+  Nhiệm vụ của bạn là viết các đoạn văn nhận xét, đánh giá về tình hình các chỉ tiêu quản trị trong kỳ báo cáo (Dân cư, Kinh tế, Khiếu nại, An ninh trật tự, và Phương hướng kỳ tới) dưới dạng JSON cấu trúc.
 
   Quy chuẩn viết báo cáo hành chính (Nghị định 30/2020/NĐ-CP):
   - Văn phong trang trọng, khách quan, chính xác, ngắn gọn và mạch lạc.
@@ -17,4 +17,10 @@ user_prompt: |
   {rag_context}
   ---
 
-  Hãy viết đoạn văn nhận xét, đánh giá chính thức cho mục này của báo cáo.
+  Hãy trả về một đối tượng JSON chứa chính xác 4 đoạn văn nhận xét sau:
+  {{
+    "nhan_xet_ai_kinh_te": "[Đoạn văn nhận định về thu chi ngân sách địa phương, tiến độ kinh tế, thương mại dựa trên số liệu kinh tế ngân sách]",
+    "nhan_xet_ai_van_hoa_xa_hoi": "[Đoạn văn nhận định về kết quả dịch vụ một cửa, hộ tịch khai sinh, khai tử, cư trú, chứng thực chữ ký dựa trên số liệu dân cư và dịch vụ hành chính công]",
+    "nhan_xet_ai_quoc_phong_an_ninh": "[Đoạn văn nhận định về tình hình tuần tra của Công an/Quân sự, số vụ va chạm giao thông hoặc vi phạm an ninh trật tự trên địa bàn]",
+    "nhan_xet_ai_phuong_huong": "[Đoạn văn phương hướng, giải pháp triển khai cải cách hành chính số, phân công ứng trực, tăng cường kiểm soát số liệu kỳ tiếp theo]"
+  }}

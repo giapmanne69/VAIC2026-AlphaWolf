@@ -92,6 +92,42 @@ if "agent" not in st.session_state:
 agent = st.session_state.agent
 
 
+# --- HELPER: TÁCH NHẬN XÉT THEO KHỐI ---
+def parse_combined_remarks(combined_text: str) -> dict:
+    """
+    Tách chuỗi văn bản gộp từ UI thành các phần nhận xét riêng lẻ dựa trên tiêu đề khối.
+    """
+    parts = {
+        "nhan_xet_ai_kinh_te": "",
+        "nhan_xet_ai_van_hoa_xa_hoi": "",
+        "nhan_xet_ai_quoc_phong_an_ninh": "",
+        "nhan_xet_ai_phuong_huong": ""
+    }
+    
+    import re
+    # Khối Kinh tế
+    match_kt = re.search(r'===\s*KHỐI KINH TẾ\s*===\n(.*?)(?===?\s*KHỐI VĂN HÓA|==?\s*KHỐI QUỐC PHÒNG|==?\s*PHƯƠNG HƯỚNG|$)', combined_text, re.DOTALL | re.IGNORECASE)
+    if match_kt:
+        parts["nhan_xet_ai_kinh_te"] = match_kt.group(1).strip()
+        
+    # Khối Văn hóa - Xã hội
+    match_vh = re.search(r'===\s*KHỐI VĂN HÓA\s*-\s*XÃ HỘI\s*===\n(.*?)(?===?\s*KHỐI QUỐC PHÒNG|==?\s*PHƯƠNG HƯỚNG|$)', combined_text, re.DOTALL | re.IGNORECASE)
+    if match_vh:
+        parts["nhan_xet_ai_van_hoa_xa_hoi"] = match_vh.group(1).strip()
+        
+    # Khối Quốc phòng - An ninh
+    match_qp = re.search(r'===\s*KHỐI QUỐC PHÒNG\s*-\s*AN NINH\s*===\n(.*?)(?===?\s*PHƯƠNG HƯỚNG|$)', combined_text, re.DOTALL | re.IGNORECASE)
+    if match_qp:
+        parts["nhan_xet_ai_quoc_phong_an_ninh"] = match_qp.group(1).strip()
+        
+    # Phương hướng
+    match_ph = re.search(r'===\s*PHƯƠNG HƯỚNG KỲ TỚI\s*===\n(.*)', combined_text, re.DOTALL | re.IGNORECASE)
+    if match_ph:
+        parts["nhan_xet_ai_phuong_huong"] = match_ph.group(1).strip()
+        
+    return parts
+
+
 # --- HELPER 1: TỰ ĐỘNG CHÈN THẺ JINJA CHO BIỂU MẪU GỐC CỦA CÁN BỘ ---
 def auto_inject_jinja_tags(template_bytes: bytes) -> bytes:
     """
@@ -102,7 +138,8 @@ def auto_inject_jinja_tags(template_bytes: bytes) -> bytes:
     try:
         doc = Document(io.BytesIO(template_bytes))
         
-        # 1. Quét qua các đoạn văn (paragraphs)
+        # 1. Quét qua các đoạn văn (paragraphs) để chèn các thẻ nhận xét riêng biệt
+        ai_template_counter = 0
         for p in doc.paragraphs:
             text = p.text
             if "[Kỳ báo cáo]" in text:
@@ -110,7 +147,15 @@ def auto_inject_jinja_tags(template_bytes: bytes) -> bytes:
             if "[Kỳ tiếp theo]" in text:
                 text = text.replace("[Kỳ tiếp theo]", "Kỳ tiếp theo")
             if "⚡ [AI Assistant Template]" in text or "AI Assistant Template" in text:
-                text = "{{ nhan_xet_ai }}"
+                ai_template_counter += 1
+                if ai_template_counter == 1:
+                    text = "{{ nhan_xet_ai_kinh_te }}"
+                elif ai_template_counter == 2:
+                    text = "{{ nhan_xet_ai_van_hoa_xa_hoi }}"
+                elif ai_template_counter == 3:
+                    text = "{{ nhan_xet_ai_quoc_phong_an_ninh }}"
+                else:
+                    text = "{{ nhan_xet_ai_phuong_huong }}"
             p.text = text
             
         # 2. Quét qua các bảng biểu (tables)
@@ -188,7 +233,16 @@ def render_docx_in_memory(template_bytes: bytes, kpi_data: dict, remarks: str) -
     try:
         doc = DocxTemplate(io.BytesIO(template_bytes))
         context = kpi_data.copy()
-        context["nhan_xet_ai"] = remarks
+        
+        # Xử lý dọn sạch các giá trị None/null tránh in chữ None ra Word
+        for k, v in list(context.items()):
+            if v is None or v == "None" or v == "null":
+                context[k] = ""
+                
+        # Phân tách nhận xét tổng hợp từ UI ra các trường riêng lẻ
+        remarks_parts = parse_combined_remarks(remarks)
+        context.update(remarks_parts)
+        context["nhan_xet_ai"] = remarks # Giữ cho tương thích ngược
         
         logger.info(f"Đang render Word trực tiếp trên bộ nhớ với {len(kpi_data)} chỉ số.")
         doc.render(context)
