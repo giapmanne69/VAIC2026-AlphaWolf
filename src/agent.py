@@ -1,14 +1,16 @@
 import json
 import yaml
 import logging
+import re
+import io
 from pathlib import Path
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Generator
 from openai import OpenAI
 from docxtpl import DocxTemplate
 
 from config import settings
 from src.hooks import AnonymizerHook, RedactionHook
-from src.tools import DocParser, Standardizer, RuleEngine
+from src.tools import DocParser, Standardizer, RuleEngine, RAGSearchTool
 from src.memory import ShortTermMemory, LongTermMemory
 
 # Đảm bảo thư mục data/ đã được khởi tạo
@@ -31,6 +33,7 @@ class AgenticReportAgent:
             self.parser = DocParser()
             self.standardizer = Standardizer()
             self.rule_engine = RuleEngine()
+            self.rag_search = RAGSearchTool()
             
             self.anonymizer = AnonymizerHook()
             self.redaction = RedactionHook()
@@ -42,6 +45,7 @@ class AgenticReportAgent:
                 api_key=settings.FPT_API_KEY,
                 base_url=settings.FPT_BASE_URL
             )
+            self.restore_maps = {}
             logger.info("Khởi tạo thành công OpenAI Client kết nối FPT AI Factory.")
         except Exception as e:
             logger.exception("Lỗi khi khởi tạo AgenticReportAgent:")
@@ -87,6 +91,7 @@ class AgenticReportAgent:
             logger.exception("Lỗi xảy ra trong quá trình gọi API LLM:")
             raise e
 
+    # --- PIPELINE STAGES (GIỮ CHO TƯƠNG THÍCH NGƯỢC) ---
     def parse_template_schema(self, template_path: str) -> Dict[str, Any]:
         """
         Stage 1 & 2: Phân tích file Word mẫu trống và sinh ra Schema các trường cần điền.
@@ -161,6 +166,7 @@ class AgenticReportAgent:
         current_data = data.copy()
         
         try:
+            failures = []
             for attempt in range(max_retries + 1):
                 is_valid, failures = self.rule_engine.validate(current_data)
                 logger.info(f"Lượt thử {attempt}: Hợp lệ={is_valid}, Số quy tắc lỗi={len(failures)}")
@@ -266,3 +272,270 @@ class AgenticReportAgent:
         except Exception as e:
             logger.exception("Lỗi trong Stage 6 (generate_final_report):")
             raise e
+
+    # --- AUTONOMOUS REACT AGENT UPGRADE ---
+    def execute_agent_tool(self, tool_name: str, tool_input: Dict[str, Any], rag_context: str = "") -> Any:
+        """
+        Hộp công cụ nghiệp vụ (Tool Registry) của Tác tử AI.
+        """
+        logger.info(f"Tác tử gọi công cụ: {tool_name} với tham số: {tool_input}")
+        
+        if tool_name == "extract_schema_tool":
+            template_path = tool_input.get("template_path")
+            return self.parse_template_schema(template_path)
+            
+        elif tool_name == "read_and_clean_raw_tool":
+            file_path = tool_input.get("file_path")
+            raw_text = self.parser.parse(file_path)
+            
+            # Kiểm soát từ khóa mật
+            is_safe, found_secrets = self.redaction.is_safe(raw_text)
+            if not is_safe:
+                raw_text = self.redaction.redact(raw_text)
+                
+            # Ẩn danh PII
+            masked_text, restore_map = self.anonymizer.anonymize(raw_text)
+            self.restore_maps[file_path] = restore_map
+            return {
+                "masked_text": masked_text,
+                "restore_map_len": len(restore_map),
+                "is_redacted": not is_safe
+            }
+            
+        elif tool_name == "extract_kpis_tool":
+            raw_text = tool_input.get("raw_text")
+            schema = tool_input.get("schema")
+            
+            sys_p, user_p = self._load_prompt("raw_extractor.yaml")
+            formatted_user_p = user_p.format(
+                dynamic_schema=json.dumps(schema, ensure_ascii=False),
+                raw_document_text=raw_text
+            )
+            response = self._call_llm(sys_p, formatted_user_p, response_format="json")
+            doc_data = json.loads(response)
+            
+            # Khôi phục dữ liệu ẩn danh ngược lại từ restore maps
+            for file_path, restore_map in self.restore_maps.items():
+                for k, v in list(doc_data.items()):
+                    if isinstance(v, str):
+                        doc_data[k] = self.anonymizer.deanonymize(v, restore_map)
+            return doc_data
+            
+        elif tool_name == "validate_and_correct_tool":
+            kpi_data = tool_input.get("kpi_data")
+            is_valid, failures = self.rule_engine.validate(kpi_data)
+            return {"is_valid": is_valid, "failures": failures}
+            
+        elif tool_name == "rag_search_tool":
+            query = tool_input.get("query")
+            domain = tool_input.get("domain")
+            return self.rag_search.retrieve_context(query, domain_filter=domain)
+            
+        elif tool_name == "generate_section_remarks_tool":
+            kpi_data = tool_input.get("kpi_data")
+            sys_p, user_p = self._load_prompt("report_commenter.yaml")
+            
+            # Tự động truy vấn RAG lấy ngữ cảnh pháp lý nếu chưa có
+            effective_rag_context = rag_context
+            if not effective_rag_context:
+                queries = ["chế độ báo cáo thông tư nghị định", "quy trình giải quyết khiếu nại tố cáo", "dân cư cư trú hộ tịch"]
+                context_blocks = []
+                for q in queries:
+                    res = self.rag_search.retrieve_context(q, top_k=2)
+                    if "Không tìm thấy" not in res:
+                        context_blocks.append(res)
+                effective_rag_context = "\n\n".join(context_blocks) if context_blocks else "Không có văn cảnh quy định cụ thể."
+
+            formatted_user_p = user_p.format(
+                kpi_data=json.dumps(kpi_data, ensure_ascii=False, indent=2),
+                rag_context=effective_rag_context
+            )
+            response = self._call_llm(sys_p, formatted_user_p, response_format="json")
+            return json.loads(response)
+            
+        elif tool_name == "render_docx_report_tool":
+            template_path = tool_input.get("template_path")
+            kpi_data = tool_input.get("kpi_data")
+            remarks_dict = tool_input.get("remarks_dict", {})
+            output_path = tool_input.get("output_path")
+            
+            combined_remarks = (
+                f"=== KHỐI KINH TẾ ===\n{remarks_dict.get('nhan_xet_ai_kinh_te', '')}\n\n"
+                f"=== KHỐI VĂN HÓA - XÃ HỘI ===\n{remarks_dict.get('nhan_xet_ai_van_hoa_xa_hoi', '')}\n\n"
+                f"=== KHỐI QUỐC PHÒNG - AN NINH ===\n{remarks_dict.get('nhan_xet_ai_quoc_phong_an_ninh', '')}\n\n"
+                f"=== PHƯƠNG HƯỚNG KỲ TỚI ===\n{remarks_dict.get('nhan_xet_ai_phuong_huong', '')}"
+            )
+            
+            render_context = kpi_data.copy()
+            for k, v in list(render_context.items()):
+                if v is None or v == "None" or v == "null":
+                    render_context[k] = ""
+            render_context.update(remarks_dict)
+            render_context["nhan_xet_ai"] = combined_remarks
+            
+            doc = DocxTemplate(template_path)
+            doc.render(render_context)
+            out_p = Path(output_path)
+            out_p.parent.mkdir(parents=True, exist_ok=True)
+            doc.save(out_p)
+            
+            return {
+                "status": "success",
+                "output_path": output_path,
+                "combined_remarks": combined_remarks
+            }
+        else:
+            raise ValueError(f"Không tìm thấy công cụ nghiệp vụ: {tool_name}")
+
+    def run_react_agent_generator(
+        self, template_path: str, raw_paths: List[str], output_path: str, rag_context: str = ""
+    ) -> Generator[Dict[str, Any], None, None]:
+        """
+        Khởi chạy vòng lặp ReAct tự trị và sinh ra (yield) từng bước logs, thoughts, actions
+        dưới dạng JSON string phục vụ Server-Sent Events (SSE) hiển thị tư duy AI lên React.
+        """
+        logger.info("BẮT ĐẦU VÒNG LẶP REACT AGENT TỰ TRỊ")
+        
+        sys_p, user_p = self._load_prompt("agent_react.yaml")
+        formatted_user_p = user_p.format(
+            template_path=template_path,
+            raw_paths=json.dumps(raw_paths, ensure_ascii=False),
+            output_path=output_path
+        )
+        
+        history = [
+            {"role": "system", "content": sys_p},
+            {"role": "user", "content": formatted_user_p}
+        ]
+        
+        step_counter = 1
+        max_steps = 15
+        
+        # Biến số trạng thái toàn cục trong phiên chạy của Tác tử
+        agent_state = {
+            "schema": None,
+            "kpi_data": {},
+            "remarks": {},
+            "raw_text_cache": {}
+        }
+        
+        while step_counter <= max_steps:
+            logger.info(f"Vòng lặp ReAct - Bước {step_counter}")
+            
+            # Gọi LLM để lấy bước suy nghĩ tiếp theo
+            try:
+                response = self.client.chat.completions.create(
+                    model=settings.LLM_MODEL,
+                    messages=history,
+                    temperature=0.1
+                )
+                content = response.choices[0].message.content
+                logger.info(f"LLM phản hồi: \n{content}")
+            except Exception as e:
+                logger.exception("Lỗi khi kết nối FPT AI Factory trong ReAct Loop:")
+                yield {"status": "error", "message": f"Lỗi kết nối FPT AI Factory: {str(e)}"}
+                return
+                
+            # Thêm phản hồi của LLM vào lịch sử hội thoại
+            history.append({"role": "assistant", "content": content})
+            
+            # Parse nội dung phản hồi (Thought, Action, Action Input, Final Answer)
+            thought = ""
+            action = None
+            action_input = {}
+            final_answer = None
+            
+            thought_match = re.search(r"Thought:\s*(.*)", content, re.IGNORECASE)
+            if thought_match:
+                thought = thought_match.group(1).strip()
+                
+            action_match = re.search(r"Action:\s*(\w+)", content, re.IGNORECASE)
+            action_input_match = re.search(r"Action Input:\s*(\{.*?\})", content, re.DOTALL)
+            
+            final_match = re.search(r"Final Answer:\s*(\{.*?\})", content, re.DOTALL)
+            if not final_match:
+                final_match = re.search(r"Final Answer:\s*(.*)", content, re.IGNORECASE)
+                if final_match:
+                    try:
+                        final_answer = json.loads(final_match.group(1).strip())
+                    except Exception:
+                        final_answer = {"status": "success", "message": final_match.group(1).strip()}
+            else:
+                try:
+                    final_answer = json.loads(final_match.group(1).strip())
+                except Exception:
+                    final_answer = {"status": "success"}
+
+            # Trường hợp 1: Tác tử đưa ra Final Answer (Hoàn thành nhiệm vụ)
+            if final_answer:
+                yield {
+                    "status": "completed",
+                    "step": step_counter,
+                    "thought": thought or "Tôi đã hoàn thành toàn bộ mục tiêu.",
+                    "final_answer": final_answer
+                }
+                return
+                
+            # Trường hợp 2: Tác tử gọi công cụ
+            if action_match and action_input_match:
+                action = action_match.group(1).strip()
+                try:
+                    action_input = json.loads(action_input_match.group(1).strip())
+                except Exception as e:
+                    observation = f"Lỗi cú pháp JSON ở Action Input: {str(e)}"
+                    history.append({"role": "user", "content": f"Observation: {observation}"})
+                    yield {
+                        "status": "running",
+                        "step": step_counter,
+                        "thought": thought,
+                        "action": action,
+                        "action_input": action_input_match.group(1).strip(),
+                        "observation": observation
+                    }
+                    step_counter += 1
+                    continue
+
+                # Thực thi công cụ nghiệp vụ
+                try:
+                    observation_result = self.execute_agent_tool(action, action_input, rag_context)
+                    
+                    # Cập nhật trạng thái Agent để theo dõi
+                    if action == "extract_schema_tool":
+                        agent_state["schema"] = observation_result
+                    elif action == "extract_kpis_tool":
+                        agent_state["kpi_data"].update(observation_result)
+                    elif action == "generate_section_remarks_tool":
+                        agent_state["remarks"] = observation_result
+                        
+                    observation = json.dumps(observation_result, ensure_ascii=False)
+                except Exception as e:
+                    logger.exception(f"Lỗi khi thực thi công cụ {action}:")
+                    observation = f"Lỗi thực thi công cụ {action}: {str(e)}"
+                
+                # Trả kết quả quan sát cho LLM ở lượt tiếp theo
+                history.append({"role": "user", "content": f"Observation: {observation}"})
+                
+                yield {
+                    "status": "running",
+                    "step": step_counter,
+                    "thought": thought,
+                    "action": action,
+                    "action_input": action_input,
+                    "observation": observation
+                }
+            else:
+                # Fallback: Nếu mô hình phản hồi không đúng ReAct format
+                observation = "Hệ thống: Vui lòng sử dụng đúng định dạng ReAct (Thought, Action, Action Input hoặc Final Answer)."
+                history.append({"role": "user", "content": f"Observation: {observation}"})
+                yield {
+                    "status": "running",
+                    "step": step_counter,
+                    "thought": content,
+                    "action": "Không rõ",
+                    "action_input": {},
+                    "observation": observation
+                }
+                
+            step_counter += 1
+            
+        yield {"status": "error", "message": "Vượt quá giới hạn bước suy nghĩ tối đa của Tác tử."}
