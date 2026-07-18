@@ -58,6 +58,38 @@ def clean_session_dir(session_id: str):
             logger.error(f"Không thể dọn dẹp session {session_id}: {str(e)}")
 
 
+def replace_text_in_paragraph(p, target, replacement):
+    """
+    Thay thế chữ trong đoạn văn mà không làm hỏng định dạng (bold, italic, font).
+    Đặc biệt, nếu đoạn văn hoặc run có chứa thẻ 'w:drawing' (ảnh/logo/chữ ký),
+    chỉ thay thế chữ ở các run không có ảnh để tránh làm mất ảnh trong tài liệu.
+    """
+    if target not in p.text:
+        return
+        
+    xml_str = p._element.xml
+    has_image = "w:drawing" in xml_str or "w:pict" in xml_str
+    
+    if has_image:
+        # Đoạn văn có ảnh: Chỉ duyệt thay thế trên những run không có ảnh
+        for run in p.runs:
+            run_xml = run.element.xml
+            if "w:drawing" not in run_xml and "w:pict" not in run_xml:
+                if target in run.text:
+                    run.text = run.text.replace(target, replacement)
+        return
+
+    # Đoạn văn thường (không có ảnh): Thay thế bảo toàn định dạng
+    if len(p.runs) == 1:
+        p.runs[0].text = p.runs[0].text.replace(target, replacement)
+    else:
+        # Ghép text đã thay thế và gán vào run đầu tiên, xóa các run sau để giữ định dạng
+        full_text = p.text.replace(target, replacement)
+        p.runs[0].text = full_text
+        for r in p.runs[1:]:
+            r.text = ""
+
+
 def auto_inject_jinja_tags(template_bytes: bytes) -> bytes:
     """
     Tự động phân tích cấu trúc tệp Word mẫu trống (.docx) do người dùng tải lên,
@@ -72,20 +104,20 @@ def auto_inject_jinja_tags(template_bytes: bytes) -> bytes:
         for p in doc.paragraphs:
             text = p.text
             if "[Kỳ báo cáo]" in text:
-                text = text.replace("[Kỳ báo cáo]", "{{ so_ngay_thang_nam }}")
+                replace_text_in_paragraph(p, "[Kỳ báo cáo]", "{{ so_ngay_thang_nam }}")
             if "[Kỳ tiếp theo]" in text:
-                text = text.replace("[Kỳ tiếp theo]", "Kỳ tiếp theo")
+                replace_text_in_paragraph(p, "[Kỳ tiếp theo]", "Kỳ tiếp theo")
             if "⚡ [AI Assistant Template]" in text or "AI Assistant Template" in text:
                 ai_template_counter += 1
+                target_str = "⚡ [AI Assistant Template]" if "⚡ [AI Assistant Template]" in text else "AI Assistant Template"
                 if ai_template_counter == 1:
-                    text = "{{ nhan_xet_ai_kinh_te }}"
+                    replace_text_in_paragraph(p, target_str, "{{ nhan_xet_ai_kinh_te }}")
                 elif ai_template_counter == 2:
-                    text = "{{ nhan_xet_ai_van_hoa_xa_hoi }}"
+                    replace_text_in_paragraph(p, target_str, "{{ nhan_xet_ai_van_hoa_xa_hoi }}")
                 elif ai_template_counter == 3:
-                    text = "{{ nhan_xet_ai_quoc_phong_an_ninh }}"
+                    replace_text_in_paragraph(p, target_str, "{{ nhan_xet_ai_quoc_phong_an_ninh }}")
                 else:
-                    text = "{{ nhan_xet_ai_phuong_huong }}"
-            p.text = text
+                    replace_text_in_paragraph(p, target_str, "{{ nhan_xet_ai_phuong_huong }}")
             
         # 2. Quét qua các bảng biểu (tables)
         for table in doc.tables:
@@ -95,29 +127,31 @@ def auto_inject_jinja_tags(template_bytes: bytes) -> bytes:
                     continue
                 
                 # Kiểm tra thông tin hành chính ở cột đầu tiên
-                first_cell_text = cells[0].text.strip()
+                first_cell = cells[0]
+                first_cell_text = first_cell.text.strip()
                 if "UBND QUẬN/HUYỆN" in first_cell_text:
-                    text = cells[0].text
-                    if "[..........]" in text:
-                        text = text.replace("[..........]", "{{ ten_co_quan_cap_on }}", 1)
-                    if "[..........]" in text:
-                        text = text.replace("[..........]", "{{ ten_co_quan_cap_duoi }}", 1)
-                    cells[0].text = text
+                    for p in first_cell.paragraphs:
+                        replace_text_in_paragraph(p, "[..........]", "{{ ten_co_quan_cap_on }}")
+                        replace_text_in_paragraph(p, "[..........]", "{{ ten_co_quan_cap_duoi }}")
                     
                     # Địa danh ngày tháng năm
-                    if len(cells) > 1 and "ngày ...... tháng" in cells[1].text:
-                        cells[1].text = "{{ so_ngay_thang_nam }}"
+                    if len(cells) > 1:
+                        cell_1 = cells[1]
+                        for p in cell_1.paragraphs:
+                            for text_to_replace in ["ngày ...... tháng ...... năm 20...", "ngày ...... tháng"]:
+                                if text_to_replace in p.text:
+                                    replace_text_in_paragraph(p, text_to_replace, "{{ so_ngay_thang_nam }}")
                         
                 # Tên chỉ tiêu ở cột index 1
                 indicator_name = cells[1].text.strip()
                 indicator_lower = indicator_name.lower()
                 
                 # Ký tên chủ tịch ở cuối bảng
-                last_cell_text = cells[-1].text.strip()
+                last_cell = cells[-1]
+                last_cell_text = last_cell.text.strip()
                 if "CHỦ TỊCH" in last_cell_text or "Chủ tịch" in last_cell_text:
-                    text = cells[-1].text
-                    if "[Điền họ và tên Chủ tịch]" in text:
-                        cells[-1].text = text.replace("[Điền họ và tên Chủ tịch]", "{{ ten_chu_tich }}")
+                    for p in last_cell.paragraphs:
+                        replace_text_in_paragraph(p, "[Điền họ và tên Chủ tịch]", "{{ ten_chu_tich }}")
                 
                 # So khớp từ khóa để map chỉ tiêu
                 var_base = None
@@ -138,11 +172,28 @@ def auto_inject_jinja_tags(template_bytes: bytes) -> bytes:
                 
                 if var_base:
                     # Kỳ trước (Cột 4 / Index 3)
-                    if len(cells) > 3 and ("[Điền]" in cells[3].text or cells[3].text.strip() == ""):
-                        cells[3].text = f"{{{{ {var_base}_ky_truoc }}}}"
+                    if len(cells) > 3:
+                        cell_3 = cells[3]
+                        for p in cell_3.paragraphs:
+                            if "[Điền]" in p.text:
+                                replace_text_in_paragraph(p, "[Điền]", f"{{{{ {var_base}_ky_truoc }}}}")
+                            elif p.text.strip() == "":
+                                if not p.runs:
+                                    p.add_run(f"{{{{ {var_base}_ky_truoc }}}}")
+                                else:
+                                    p.runs[0].text = f"{{{{ {var_base}_ky_truoc }}}}"
+                                    
                     # Kỳ báo cáo (Cột 5 / Index 4)
-                    if len(cells) > 4 and ("[Điền]" in cells[4].text or cells[4].text.strip() == ""):
-                        cells[4].text = f"{{{{ {var_base}_ky_bao_cao }}}}"
+                    if len(cells) > 4:
+                        cell_4 = cells[4]
+                        for p in cell_4.paragraphs:
+                            if "[Điền]" in p.text:
+                                replace_text_in_paragraph(p, "[Điền]", f"{{{{ {var_base}_ky_bao_cao }}}}")
+                            elif p.text.strip() == "":
+                                if not p.runs:
+                                    p.add_run(f"{{{{ {var_base}_ky_bao_cao }}}}")
+                                else:
+                                    p.runs[0].text = f"{{{{ {var_base}_ky_bao_cao }}}}"
                         
         output_stream = io.BytesIO()
         doc.save(output_stream)
