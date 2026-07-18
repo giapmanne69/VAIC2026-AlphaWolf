@@ -14,45 +14,47 @@ Hệ thống được xây dựng theo hướng **AI-native**, sử dụng **LLM
 
 ## Mục tiêu
 
-Tiếp nhận và bảo mật hóa toàn bộ tài liệu đầu vào trước khi xử lý.
+Tiếp nhận tệp biểu mẫu cùng tài liệu đầu vào, và tiến hành bảo mật hóa dữ liệu trước khi xử lý.
 
 ## Input
 
-- Báo cáo của các bộ phận chuyên môn gửi lên (Tư pháp, Công an, Một cửa...) dưới dạng Word, Excel, PDF.
+- **Mẫu báo cáo trống** do cán bộ tải lên (`template.docx`).
+- Các file báo cáo thô của các phòng ban gửi về (`inputs/` dưới dạng Word, Excel, PDF).
 
 ## Xử lý (Agentic Mechanism)
 
-- Tác tử tiếp nhận tài liệu và tự động chạy **Anonymization Hook**:
+- Tác tử tiếp nhận cả tệp biểu mẫu trống và các báo cáo thô.
+- Tự động chạy **Anonymization Hook** trên các tệp báo cáo thô:
   - Dùng Regex/NER phát hiện và che giấu/mã hóa (masking) thông tin cá nhân (PII) như Họ tên công dân, Số điện thoại, CCCD,... theo đúng Nghị định 13/2023/NĐ-CP.
   - Lọc và phát hiện thông tin thuộc danh mục mật bằng **Redaction Hook**.
 
 ## Output
 
-- Anonymized Raw Documents (Tài liệu thô đã được bảo mật hóa)
+- Mẫu báo cáo trống (`template.docx`)
+- Anonymized Raw Documents (Báo cáo thô đã được bảo mật hóa)
 
 ---
 
-# Stage 2. Data Extraction (Parser Tools)
+# Stage 2. Template Parsing & Data Extraction (Parser Tools)
 
 ## Mục tiêu
 
-Chuyển đổi dữ liệu phi cấu trúc từ các tệp thô thành dữ liệu có cấu trúc.
+Phân tích biểu mẫu để xác định các trường cần điền, sau đó trích xuất đích danh các số liệu từ tài liệu thô.
 
 ## Input
 
+- Mẫu báo cáo trống (`template.docx`)
 - Anonymized Raw Documents
 
 ## Xử lý (Agentic Mechanism)
 
-- Tác tử phân tích định dạng tệp và tự động gọi các công cụ trích xuất tương ứng:
-  - Gọi **Excel Parser Tool** để đọc bảng biểu.
-  - Gọi **Word/PDF Parser Tool** để trích xuất văn bản thô.
-  - Gọi **OCR Tool** đối với các báo cáo dạng quét (PDF Scan).
-- Tác tử gọi LLM trích xuất số liệu thô thông qua Pydantic schema của [report_schema.json](file:///e:/Project/VAIC_Project/data/chuan_hoa_hop_nhat/report_schema.json).
+1. **Phân tích Biểu mẫu (Template Parsing):** Tác tử quét qua cấu trúc tệp `template.docx` để tìm tất cả các thẻ tag đặt sẵn (dạng `{{tong_dan_so}}`, `{{ty_le_dung_han}}`) hoặc các ô trống trong bảng biểu. Tác tử tự động biên dịch chúng thành một **Dynamic Schema (Danh sách các trường số liệu cần tìm)**.
+2. **Trích xuất có định hướng (Targeted Extraction):** Tác tử sử dụng Dynamic Schema vừa tạo để làm mục tiêu trích xuất. Tác tử gọi các công cụ tương ứng (**Excel Parser**, **Word/PDF Parser**, hoặc **OCR Tool**) để chỉ quét và lấy đúng các con số/thông tin cần thiết từ báo cáo thô, bỏ qua thông tin thừa để tiết kiệm token và tránh nhiễu.
 
 ## Output
 
-- Raw JSON Dataset
+- Dynamic Schema (Danh sách trường cần điền)
+- Raw JSON Dataset (Chứa đúng các biến trong Schema)
 - Document Metadata
 
 ---
@@ -126,26 +128,27 @@ Truy xuất thông tin pháp lý và biểu mẫu chuẩn làm căn cứ viết 
 
 ---
 
-# Stage 6. Report Generation (Memory & Templates)
+# Stage 6. Report Generation (Memory & Template Injection)
 
 ## Mục tiêu
 
-Sinh dự thảo báo cáo hành chính đúng mẫu của UBND.
+Sinh dự thảo báo cáo hành chính hoàn chỉnh trực tiếp trên tệp biểu mẫu đã tải lên.
 
 ## Input
 
 - Unified KPI Dataset
-- Legal Context & Report Layout
+- Legal Context
+- Mẫu báo cáo trống (`template.docx` từ Stage 1)
 
 ## Xử lý (Agentic Mechanism)
 
-- Tác tử nạp **Short-term Memory** (ngữ cảnh cuộc đối thoại hiện tại) và **Long-term Memory** (thói quen, phong cách viết báo cáo của cán bộ phường trong quá khứ).
-- Tác tử viết các đoạn văn bản nhận xét/đánh giá kết hợp căn cứ luật pháp từ RAG.
-- Tác tử gọi công cụ **Docx Template Engine (`docxtpl`)** để đổ tự động các trường số liệu từ `Unified KPI Dataset` vào đúng vị trí biểu mẫu Word chuẩn, đồng thời chèn các đoạn văn nhận xét do LLM viết vào.
+- Tác tử nạp **Short-term Memory** (ngữ cảnh cuộc đối thoại) và **Long-term Memory** (thói quen, phong cách viết báo cáo của cán bộ phường trong quá khứ).
+- Tác tử viết các đoạn văn bản nhận xét/đánh giá dựa trên RAG luật pháp và đưa vào bộ nhớ.
+- Tác tử gọi công cụ **Docx Template Engine (`docxtpl`)** để điền trực tiếp dữ liệu số từ `Unified KPI Dataset` và các đoạn văn nhận xét vào đúng các tag placeholder trên tệp **`template.docx` gốc**, đảm bảo giữ nguyên 100% định dạng lề, bảng biểu và font chữ của UBND phường.
 
 ## Output
 
-- Draft Word Report (.docx)
+- Draft Word Report (.docx) (Bản Word đầy đủ nội dung)
 
 ---
 
@@ -200,36 +203,36 @@ Trình duyệt và học hỏi từ các chỉnh sửa của con người.
 # Tổng quan Pipeline Tác tử (Agentic Flow)
 
 ```text
-       [Dữ liệu thô của các phòng ban]
-                     │
-                     ▼
-  Stage 1. Ingestion & Security Hook (PII Masking)
-                     │
-                     ▼
-  Stage 2. Data Extraction (Calling Parser Tools)
-                     │
-                     ▼
-  Stage 3. Data Standardization (Fuzzy Match GSO)
-                     │
-                     ▼
-  Stage 4. KPI Generation & Self-Correction (Rule Engine)  ◄──┐
-                     │                                         │ (Vòng tự sửa số liệu)
-                     ├── Vi phạm logic số liệu ────────────────┘
-                     │
-                     ▼ (Số liệu đã nhất quán)
-  Stage 5. Dynamic Knowledge Retrieval (RAG Search Tool)
-                     │
-                     ▼
-  Stage 6. Report Generation (Memory + docxtpl Engine)
-                     │
-                     ▼
-  Stage 7. AI Self-Validation & Refinement
-                     │
-                     ▼
-  Stage 8. Human Review & Memory Update (HER Tracking)
-                     │
-                     ▼
-       [Báo cáo chính thức xuất bản]
+    [Mẫu báo cáo trống template.docx + Báo cáo thô]
+                           │
+                           ▼
+     Stage 1. Ingestion & Security Hook (PII Masking)
+                           │
+                           ▼
+     Stage 2. Template Parsing (Dynamic Schema) & Extraction
+                           │
+                           ▼
+     Stage 3. Data Standardization (Fuzzy Match GSO)
+                           │
+                           ▼
+     Stage 4. KPI Generation & Self-Correction (Rule Engine)  ◄──┐
+                           │                                         │ (Vòng tự sửa số liệu)
+                           ├── Vi phạm logic số liệu ────────────────┘
+                           │
+                           ▼ (Số liệu đã nhất quán)
+     Stage 5. Dynamic Knowledge Retrieval (RAG Search Tool)
+                           │
+                           ▼
+     Stage 6. Report Generation (Memory + docxtpl Injection)
+                           │
+                           ▼
+     Stage 7. AI Self-Validation & Refinement
+                           │
+                           ▼
+     Stage 8. Human Review & Memory Update (HER Tracking)
+                           │
+                           ▼
+             [Báo cáo chính thức xuất bản]
 ```
 
 

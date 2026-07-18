@@ -1,5 +1,6 @@
 # IDE collaboration logs
 .gemini/
+!.gemini/sessions/
 
 # Python virtual environment and cache
 __pycache__/

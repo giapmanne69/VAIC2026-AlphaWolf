@@ -114,57 +114,44 @@ Hệ thống được xây dựng theo hướng **AI-native**, sử dụng **LLM
 
 # 5. Kiến trúc Pipeline
 
-## 5.1 Data Pipeline
+## 5.1 Luồng Xử lý của Tác tử (Agentic Flow)
 
 ```text
-Data Sources
-      │
-      ▼
-Ingestion
-(API / ETL / OCR)
-      │
-      ▼
-Data Extraction
-      │
-      ▼
-Data Standardization
-      │
-      ▼
-Data Integration
-      │
-      ▼
-Unified Dataset
+[Mẫu báo cáo template.docx + Báo cáo thô của các phòng ban]
+                           │
+                           ▼
+     Stage 1. Ingestion & Security Hook (PII Masking)
+                           │
+                           ▼
+     Stage 2. Template Parsing (Dynamic Schema) & Extraction
+                           │
+                           ▼
+     Stage 3. Data Standardization (Fuzzy Match GSO)
+                           │
+                           ▼
+     Stage 4. KPI Generation & Self-Correction (Rule Engine)  ◄──┐
+                           │                                         │ (Vòng tự sửa số liệu)
+                           ├── Vi phạm logic số liệu ────────────────┘
+                           │
+                           ▼ (Số liệu đã nhất quán)
+     Stage 5. Dynamic Knowledge Retrieval (RAG Search Tool)
+                           │
+                           ▼
+     Stage 6. Report Generation (Memory + docxtpl Injection)
+                           │
+                           ▼
+     Stage 7. AI Self-Validation & Refinement
+                           │
+                           ▼
+     Stage 8. Human Review & Memory Update (HER Tracking)
+                           │
+                           ▼
+             [Báo cáo chính thức xuất bản]
 ```
 
 ---
 
-## 5.2 Main Pipeline
-
-```text
-Unified Dataset
-      │
-      ▼
-KPI & Statistics Generation
-      │
-      ▼
-Knowledge Retrieval (RAG)
-      │
-      ▼
-Report Generation (LLM)
-      │
-      ▼
-AI Validation
-      │
-      ▼
-Export Report
-      │
-      ▼
-Word / PDF / Dashboard
-```
-
----
-
-## 5.3 Evaluation Pipeline
+## 5.2 Evaluation Pipeline
 
 ```text
 Ground Truth
