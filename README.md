@@ -212,14 +212,14 @@ Các quy chế và ranh giới hoạt động quy định hành vi của tác t�
 
 # 7. Công nghệ đề xuất
 
-- **LLM:** Qwen2.5-7B-Instruct (hoặc tương đương)
+- **LLM:** Llama-3.3-70B-Instruct (hoặc tương đương)
 - **RAG:** Vector Database + Embedding Model
 - **Document Processing:** OCR + Parser (Word, Excel, PDF)
 - **Rule Engine:** Chuẩn hóa dữ liệu và kiểm tra nghiệp vụ
 - **Backend:** FastAPI
-- **Frontend:** Streamlit hoặc React
+- **Frontend:** Streamlit
 - **Database:** PostgreSQL
-- **Vector Database:** ChromaDB hoặc FAISS
+- **Vector Database:** FAISS
 
 ---
 
@@ -299,4 +299,4 @@ VAIC_Project/
 ├── .gitignore                  # Cấu hình bỏ qua tệp của Git (đã cho phép tracking session)
 └── README.md                   # Tài liệu tổng quan bối cảnh, kiến trúc
 ```
-
+
