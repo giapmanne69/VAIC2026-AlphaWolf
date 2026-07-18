@@ -11,6 +11,7 @@ import pandas as pd
 import io
 import logging
 from docxtpl import DocxTemplate
+from docx import Document
 
 # Khởi tạo logger cho Frontend
 logger = logging.getLogger("StreamlitApp")
@@ -90,7 +91,95 @@ if "agent" not in st.session_state:
 
 agent = st.session_state.agent
 
-# --- HELPER: RENDER WORD IN-MEMORY (TRÁNH LỖI FILE TRỐNG) ---
+
+# --- HELPER 1: TỰ ĐỘNG CHÈN THẺ JINJA CHO BIỂU MẪU GỐC CỦA CÁN BỘ ---
+def auto_inject_jinja_tags(template_bytes: bytes) -> bytes:
+    """
+    Tự động phân tích cấu trúc tệp Word mẫu trống (.docx) do người dùng tải lên,
+    tìm các ký tự giữ chỗ cổ điển (như [..........], [Điền], AI Assistant Template)
+    và thay thế bằng thẻ Jinja {{ ... }} tương ứng để docxtpl có thể điền được.
+    """
+    try:
+        doc = Document(io.BytesIO(template_bytes))
+        
+        # 1. Quét qua các đoạn văn (paragraphs)
+        for p in doc.paragraphs:
+            text = p.text
+            if "[Kỳ báo cáo]" in text:
+                text = text.replace("[Kỳ báo cáo]", "{{ so_ngay_thang_nam }}")
+            if "[Kỳ tiếp theo]" in text:
+                text = text.replace("[Kỳ tiếp theo]", "Kỳ tiếp theo")
+            if "⚡ [AI Assistant Template]" in text or "AI Assistant Template" in text:
+                text = "{{ nhan_xet_ai }}"
+            p.text = text
+            
+        # 2. Quét qua các bảng biểu (tables)
+        for table in doc.tables:
+            for row in table.rows:
+                cells = row.cells
+                if len(cells) < 2:
+                    continue
+                
+                # Kiểm tra thông tin hành chính ở cột đầu tiên
+                first_cell_text = cells[0].text.strip()
+                if "UBND QUẬN/HUYỆN" in first_cell_text:
+                    text = cells[0].text
+                    if "[..........]" in text:
+                        text = text.replace("[..........]", "{{ ten_co_quan_cap_on }}", 1)
+                    if "[..........]" in text:
+                        text = text.replace("[..........]", "{{ ten_co_quan_cap_duoi }}", 1)
+                    cells[0].text = text
+                    
+                    # Địa danh ngày tháng năm
+                    if len(cells) > 1 and "ngày ...... tháng" in cells[1].text:
+                        cells[1].text = "{{ so_ngay_thang_nam }}"
+                        
+                # Tên chỉ tiêu ở cột index 1
+                indicator_name = cells[1].text.strip()
+                indicator_lower = indicator_name.lower()
+                
+                # Ký tên chủ tịch ở cuối bảng
+                last_cell_text = cells[-1].text.strip()
+                if "CHỦ TỊCH" in last_cell_text or "Chủ tịch" in last_cell_text:
+                    text = cells[-1].text
+                    if "[Điền họ và tên Chủ tịch]" in text:
+                        cells[-1].text = text.replace("[Điền họ và tên Chủ tịch]", "{{ ten_chu_tich }}")
+                
+                # So khớp từ khóa để map chỉ tiêu
+                var_base = None
+                if "thu ngân sách" in indicator_lower:
+                    var_base = "tong_thu_ngan_sach_nha_nuoc"
+                elif "chi ngân sách" in indicator_lower:
+                    var_base = "tong_chi_ngan_sach_dia_phuong"
+                elif "khai sinh" in indicator_lower:
+                    var_base = "dang_ky_khai_sinh"
+                elif "khai tử" in indicator_lower or "khai tu" in indicator_lower:
+                    var_base = "dang_ky_khai_tu"
+                elif "cư trú" in indicator_lower or "tạm trú" in indicator_lower:
+                    var_base = "tam_tru_moi"
+                elif "chứng thực" in indicator_lower:
+                    var_base = "chung_thuc_chu_ky"
+                elif "an ninh" in indicator_lower or "trật tự" in indicator_lower:
+                    var_base = "vi_pham_an_ninh_trat_tu"
+                
+                if var_base:
+                    # Kỳ trước (Cột 4 / Index 3)
+                    if len(cells) > 3 and ("[Điền]" in cells[3].text or cells[3].text.strip() == ""):
+                        cells[3].text = f"{{{{ {var_base}_ky_truoc }}}}"
+                    # Kỳ báo cáo (Cột 5 / Index 4)
+                    if len(cells) > 4 and ("[Điền]" in cells[4].text or cells[4].text.strip() == ""):
+                        cells[4].text = f"{{{{ {var_base}_ky_bao_cao }}}}"
+                        
+        output_stream = io.BytesIO()
+        doc.save(output_stream)
+        logger.info("Tự động chèn thẻ Jinja thành công vào tệp biểu mẫu.")
+        return output_stream.getvalue()
+    except Exception as e:
+        logger.exception("Lỗi khi tự động chèn thẻ Jinja vào biểu mẫu trống:")
+        raise e
+
+
+# --- HELPER 2: RENDER WORD IN-MEMORY ---
 def render_docx_in_memory(template_bytes: bytes, kpi_data: dict, remarks: str) -> bytes:
     """
     Render biểu mẫu Word trực tiếp trên bộ nhớ RAM để đảm bảo tính đồng bộ dữ liệu
@@ -110,6 +199,7 @@ def render_docx_in_memory(template_bytes: bytes, kpi_data: dict, remarks: str) -
     except Exception as e:
         logger.exception("Lỗi khi render biểu mẫu Word trong bộ nhớ:")
         raise e
+
 
 # --- SIDEBAR: CẤU HÌNH HỆ THỐNG ---
 st.sidebar.markdown("<h2 style='font-weight:800;'>⚙️ CẤU HÌNH AI</h2>", unsafe_allow_html=True)
@@ -137,7 +227,7 @@ with col_upload:
     template_file = st.file_uploader(
         "Tải lên Biểu mẫu trống (.docx)", 
         type=["docx"], 
-        help="Cán bộ tải biểu mẫu có sẵn hoặc mẫu có chứa Jinja tags {{placeholder}} để AI điền vào."
+        help="Cán bộ tải biểu mẫu trống của phường có chứa ngoặc vuông hoặc dấu gạch dưới để AI tự động điền."
     )
     
     # 2. Upload các file báo cáo phòng ban chuyên ngành thô
@@ -166,8 +256,8 @@ with col_process:
         if st.button("🚀 BẮT ĐẦU XỬ LÝ REPORT PIPELINE", type="primary", width="stretch"):
             logger.info("--- BẮT ĐẦU CHẠY PIPELINE TRÍCH XUẤT ---")
             
-            # Lưu trữ file bytes của template vào session state
-            st.session_state.template_bytes = template_file.getvalue()
+            # Lưu trữ file bytes gốc và chuẩn bị tên file đầu ra
+            original_bytes = template_file.getvalue()
             st.session_state.output_file_name = f"Bao_cao_tong_hop_{Path(template_file.name).stem}.docx"
             
             # Sử dụng thư mục tạm thời để lưu file vật lý chạy Parser
@@ -176,7 +266,7 @@ with col_process:
                 
                 temp_template_path = tmp_dir_path / template_file.name
                 with open(temp_template_path, "wb") as f:
-                    f.write(st.session_state.template_bytes)
+                    f.write(original_bytes)
                 
                 temp_raw_paths = []
                 for rf in raw_files:
@@ -189,16 +279,21 @@ with col_process:
                     # --- STAGE 1: Phân tích biểu mẫu mẫu ---
                     with st.status("🔍 Stage 1: Đang quét cấu hình biểu mẫu mẫu trống...", expanded=True) as status:
                         schema = agent.parse_template_schema(str(temp_template_path))
-                        st.write("Schema chỉ tiêu phát hiện được:")
+                        st.write("Schema chỉ tiêu phát hiện được từ mẫu thô:")
                         st.json(schema)
-                        status.update(label="Stage 1: Hoàn tất!", state="complete")
+                        status.update(label="Stage 1: Hoàn tất phân tích mẫu!", state="complete")
+                    
+                    # Tự động chèn thẻ Jinja vào biểu mẫu gốc trước khi render trên bộ nhớ
+                    with st.status("⚡ Đang tự động gắn thẻ liên kết dữ liệu vào mẫu trống...", expanded=True) as status:
+                        st.session_state.template_bytes = auto_inject_jinja_tags(original_bytes)
+                        status.update(label="Đã tự động liên kết thẻ mẫu thành công!", state="complete")
                     
                     # --- STAGE 2 & 3: Trích xuất số liệu ---
                     with st.status("🛡️ Stage 2 & 3: Đang ẩn danh PII và trích xuất số liệu...", expanded=True) as status:
                         raw_data = agent.extract_from_raw_inputs(schema, temp_raw_paths)
                         st.write("Dữ liệu trích xuất:")
                         st.json(raw_data)
-                        status.update(label="Stage 2 & 3: Hoàn tất!", state="complete")
+                        status.update(label="Stage 2 & 3: Hoàn tất trích xuất!", state="complete")
                     
                     # --- STAGE 4: Kiểm chéo và tự sửa lỗi ---
                     with st.status("🧮 Stage 4: Đang kiểm tra logic số liệu chéo...", expanded=True) as status:
@@ -219,11 +314,10 @@ with col_process:
                     
                     # --- STAGE 6: Sinh nhận định ---
                     with st.status("📝 Stage 6: Đang sinh đoạn văn nhận định...", expanded=True) as status:
-                        # Sinh nhận xét thô bằng LLM và lưu vào bộ nhớ
                         remarks = agent.generate_final_report(
                             kpi_data=final_data,
                             template_path=str(temp_template_path),
-                            output_path=str(tmp_dir_path / "mock.docx"), # Chỉ ghi file mock thô
+                            output_path=str(tmp_dir_path / "mock.docx"),
                             rag_context=rag_context
                         )
                         st.write("Nhận định từ LLM:")
