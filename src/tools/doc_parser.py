@@ -5,6 +5,7 @@ import openpyxl
 from docx import Document
 import pdfplumber
 from PIL import Image
+from config import settings
 
 try:
     import pytesseract
@@ -127,16 +128,52 @@ class DocParser:
         return "\n".join(content)
 
     def parse_image(self, path: Path) -> str:
-        logger.info(f"Đang chạy OCR hình ảnh sử dụng Tesseract: {path.name}")
-        if not pytesseract:
-            logger.error("Thư viện pytesseract chưa được cài đặt.")
-            return "[Lỗi: Thư viện pytesseract chưa được cài đặt để xử lý OCR ảnh]"
-            
+        logger.info(f"Đang chạy OCR hình ảnh. Thử nghiệm gọi FPT Vision Model: {settings.VISION_MODEL}")
         try:
-            image = Image.open(path)
-            text = pytesseract.image_to_string(image, lang="vie+eng")
-            logger.info("Hoàn tất chạy OCR hình ảnh.")
-            return text.strip()
-        except Exception as e:
-            logger.exception(f"Lỗi OCR hình ảnh {path.name}:")
-            return f"[Lỗi OCR ảnh {path.name}: {str(e)}]"
+            import base64
+            from openai import OpenAI
+            
+            with open(path, "rb") as image_file:
+                base64_image = base64.b64encode(image_file.read()).decode("utf-8")
+                
+            client = OpenAI(api_key=settings.FPT_API_KEY, base_url=settings.FPT_BASE_URL)
+            response = client.chat.completions.create(
+                model=settings.VISION_MODEL,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text", 
+                                "text": "Hãy chuyển tải toàn bộ văn bản tiếng Việt có trong hình ảnh này thành định dạng text, giữ nguyên cấu trúc dòng và bảng số liệu nếu có. Không giải thích thêm."
+                            },
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/jpeg;base64,{base64_image}"
+                                }
+                            }
+                        ]
+                    }
+                ],
+                max_tokens=2048,
+                temperature=0.1
+            )
+            text_result = response.choices[0].message.content
+            logger.info("Hoàn tất trích xuất văn bản từ ảnh qua Vision Model.")
+            return text_result.strip()
+        except Exception as api_err:
+            logger.warning(f"Không thể gọi FPT Vision Model ({str(api_err)}). Thử fallback sang Tesseract local...")
+            
+            if not pytesseract:
+                logger.error("Thư viện pytesseract chưa được cài đặt.")
+                return f"[Lỗi trích xuất ảnh: Thư viện pytesseract chưa được cài đặt và API Vision gặp lỗi: {str(api_err)}]"
+                
+            try:
+                image = Image.open(path)
+                text = pytesseract.image_to_string(image, lang="vie+eng")
+                logger.info("Hoàn tất chạy OCR hình ảnh bằng Tesseract local.")
+                return text.strip()
+            except Exception as e:
+                logger.exception(f"Lỗi OCR hình ảnh {path.name}:")
+                return f"[Lỗi OCR ảnh {path.name}: {str(e)}]"
