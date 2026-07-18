@@ -19,3 +19,8 @@ data/output_reports/
 data/raw_inputs/
 data/templates/
 data/*.log
+data/memory.db
+data/sessions/
+*.db
+*.sqlite
+*.sqlite3
