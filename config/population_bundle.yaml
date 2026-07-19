@@ -1,0 +1,83 @@
+population_roles:
+  opening_balance:
+    required_fields:
+      - population_opening
+      - temporary_opening
+    detail_table:
+      headers:
+        area_code: "mã địa bàn"
+        permanent_total: "tổng thường trú"
+        temporary_total: "tổng tạm trú"
+      stop_marker: "tổng cộng"
+  civil_status:
+    required_fields:
+      - birth_registered
+      - birth_local_resident
+      - death_registered
+      - death_local_resident
+    detail_table:
+      headers:
+        event_code: "mã sự kiện"
+        event_type: "loại sự kiện"
+        local_resident: "thuộc dân cư thường trú xã"
+      event_map:
+        KHAI_SINH:
+          registered: birth_registered
+          local_resident: birth_local_resident
+        KHAI_TU:
+          registered: death_registered
+          local_resident: death_local_resident
+      local_yes_values:
+        - "có"
+  residence_movement:
+    required_fields:
+      - permanent_in
+      - permanent_out
+      - temporary_new
+      - temporary_removed
+    detail_table:
+      headers:
+        movement_code: "mã biến động"
+        movement_type: "loại biến động"
+      movement_map:
+        THUONG_TRU_DEN: permanent_in
+        THUONG_TRU_DI: permanent_out
+        TAM_TRU_MOI: temporary_new
+        TAM_TRU_KET_THUC: temporary_removed
+
+field_names:
+  population_opening: Dân số thường trú đầu kỳ
+  temporary_opening: Người tạm trú đầu kỳ
+  birth_registered: KHAI SINH
+  birth_local_resident: Khai sinh thuộc dân cư thường trú xã
+  death_registered: KHAI TỬ
+  death_local_resident: Tử vong thuộc dân cư thường trú xã
+  permanent_in: Đăng ký thường trú đến
+  permanent_out: Đăng ký thường trú đi
+  temporary_new: Đăng ký tạm trú mới
+  temporary_removed: Tạm trú kết thúc
+
+summary_header_fields:
+  - population_opening
+  - temporary_opening
+  - birth_registered
+  - birth_local_resident
+  - death_registered
+  - death_local_resident
+  - permanent_in
+  - permanent_out
+  - temporary_new
+  - temporary_removed
+
+summary_value_column_index: 2
+
+metadata_keys:
+  reporting_period: "kỳ báo cáo"
+  organization: "đơn vị tổng hợp"
+
+classification:
+  synthetic_keyword: "SYNTHETIC_TEST_DATA"
+
+closing_formulas:
+  population_closing: "population_opening + birth_local_resident + permanent_in - death_local_resident - permanent_out"
+  temporary_closing: "temporary_opening + temporary_new - temporary_removed"

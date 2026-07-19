@@ -144,11 +144,19 @@ class MemoryManager:
         conn = self.get_connection()
         cursor = conn.cursor()
         meta_str = json.dumps(meta_dict) if meta_dict else "{}"
+
+        safe_value = value
+        if isinstance(value, (list, dict)):
+            try:
+                safe_value = json.dumps(value, ensure_ascii=False)
+            except Exception:
+                safe_value = str(value)
+
         cursor.execute("""
             INSERT OR REPLACE INTO indicators (
                 task_id, indicator_name, value, unit, source_file, sheet_name, page_number, cell_reference, confidence, metadata
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (task_id, indicator_name, value, unit, source_file, sheet_name, page_number, cell_reference, confidence, meta_str))
+        """, (task_id, indicator_name, safe_value, unit, source_file, sheet_name, page_number, cell_reference, confidence, meta_str))
         conn.commit()
         conn.close()
 

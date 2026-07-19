@@ -99,8 +99,7 @@ def auto_inject_jinja_tags(template_bytes: bytes) -> bytes:
     try:
         doc = Document(io.BytesIO(template_bytes))
         
-        # 1. Quét qua các đoạn văn (paragraphs) để chèn các thẻ nhận xét riêng biệt
-        ai_template_counter = 0
+        # 1. Quét qua các đoạn văn (paragraphs) để chèn các thẻ nhận xét theo mẫu chung
         for p in doc.paragraphs:
             text = p.text
             if "[Kỳ báo cáo]" in text:
@@ -108,16 +107,8 @@ def auto_inject_jinja_tags(template_bytes: bytes) -> bytes:
             if "[Kỳ tiếp theo]" in text:
                 replace_text_in_paragraph(p, "[Kỳ tiếp theo]", "Kỳ tiếp theo")
             if "⚡ [AI Assistant Template]" in text or "AI Assistant Template" in text:
-                ai_template_counter += 1
                 target_str = "⚡ [AI Assistant Template]" if "⚡ [AI Assistant Template]" in text else "AI Assistant Template"
-                if ai_template_counter == 1:
-                    replace_text_in_paragraph(p, target_str, "{{ nhan_xet_ai_kinh_te }}")
-                elif ai_template_counter == 2:
-                    replace_text_in_paragraph(p, target_str, "{{ nhan_xet_ai_van_hoa_xa_hoi }}")
-                elif ai_template_counter == 3:
-                    replace_text_in_paragraph(p, target_str, "{{ nhan_xet_ai_quoc_phong_an_ninh }}")
-                else:
-                    replace_text_in_paragraph(p, target_str, "{{ nhan_xet_ai_phuong_huong }}")
+                replace_text_in_paragraph(p, target_str, "{{ nhan_xet_ai }}")
             
         # 2. Quét qua các bảng biểu (tables)
         for table in doc.tables:
@@ -298,8 +289,16 @@ async def run_agent(
             session_id=session_id
         )
 
-        for step_data in react_gen:
-            yield f"data: {json.dumps(step_data, ensure_ascii=False)}\n\n"
+        try:
+            for step_data in react_gen:
+                yield f"data: {json.dumps(step_data, ensure_ascii=False)}\n\n"
+        except Exception as e:
+            logger.exception("Lỗi trong event_generator SSE:")
+            error_payload = {
+                'status': 'error',
+                'message': f'Lỗi phía server khi xử lý luồng SSE: {str(e)}'
+            }
+            yield f"data: {json.dumps(error_payload, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
@@ -325,22 +324,12 @@ def render_docx(req: RenderRequest, background_tasks: BackgroundTasks):
     try:
         agent = AgenticReportAgent()
         
-        # Tách nhận xét gộp
         remarks_dict = {}
-        remarks = req.remarks
-        
-        import re
-        match_kt = re.search(r'===\s*KHỐI KINH TẾ\s*===\n(.*?)(?===?\s*KHỐI VĂN HÓA|==?\s*KHỐI QUỐC PHÒNG|==?\s*PHƯƠNG HƯỚNG|$)', remarks, re.DOTALL | re.IGNORECASE)
-        remarks_dict["nhan_xet_ai_kinh_te"] = match_kt.group(1).strip() if match_kt else ""
-        
-        match_vh = re.search(r'===\s*KHỐI VĂN HÓA\s*-\s*XÃ HỘI\s*===\n(.*?)(?===?\s*KHỐI QUỐC PHÒNG|==?\s*PHƯƠNG HƯỚNG|$)', remarks, re.DOTALL | re.IGNORECASE)
-        remarks_dict["nhan_xet_ai_van_hoa_xa_hoi"] = match_vh.group(1).strip() if match_vh else ""
-        
-        match_qp = re.search(r'===\s*KHỐI QUỐC PHÒNG\s*-\s*AN NINH\s*===\n(.*?)(?===?\s*PHƯƠNG HƯỚNG|$)', remarks, re.DOTALL | re.IGNORECASE)
-        remarks_dict["nhan_xet_ai_quoc_phong_an_ninh"] = match_qp.group(1).strip() if match_qp else ""
-        
-        match_ph = re.search(r'===\s*PHƯƠNG HƯỚNG KỲ TỚI\s*===\n(.*)', remarks, re.DOTALL | re.IGNORECASE)
-        remarks_dict["nhan_xet_ai_phuong_huong"] = match_ph.group(1).strip() if match_ph else ""
+        remarks = req.remarks or ""
+        if isinstance(remarks, dict):
+            remarks_dict = remarks
+        else:
+            remarks_dict["nhan_xet_ai"] = remarks.strip()
 
         # Điền biểu mẫu thông qua công cụ
         agent.execute_agent_tool("render_docx_report_tool", {

@@ -17,10 +17,24 @@ user_prompt: |
   {rag_context}
   ---
 
-  Hãy trả về một đối tượng JSON chứa chính xác 4 đoạn văn nhận xét sau:
-  {{
-    "nhan_xet_ai_kinh_te": "[Đoạn văn nhận định về thu chi ngân sách địa phương, tiến độ kinh tế, thương mại dựa trên số liệu kinh tế ngân sách]",
-    "nhan_xet_ai_van_hoa_xa_hoi": "[Đoạn văn nhận định về kết quả dịch vụ một cửa, hộ tịch khai sinh, khai tử, cư trú, chứng thực chữ ký dựa trên số liệu dân cư và dịch vụ hành chính công]",
-    "nhan_xet_ai_quoc_phong_an_ninh": "[Đoạn văn nhận định về tình hình tuần tra của Công an/Quân sự, số vụ va chạm giao thông hoặc vi phạm an ninh trật tự trên địa bàn]",
-    "nhan_xet_ai_phuong_huong": "[Đoạn văn phương hướng, giải pháp triển khai cải cách hành chính số, phân công ứng trực, tăng cường kiểm soát số liệu kỳ tiếp theo]"
-  }}
+  ### Ngữ cảnh văn bản tích lũy (Textual Context):
+  ---
+  {textual_context}
+  ---
+
+  ### Nội dung của mẫu báo cáo chuẩn đầu vào (Template Context):
+  ---
+  {template_context}
+  ---
+
+  ### Schema hiện tại:
+  ---
+  {schema}
+  ---
+
+  ### Các trường text/schema cần điền bằng văn bản:
+  ---
+  {textual_fields}
+  ---
+
+  Hãy trả về một đối tượng JSON. Mỗi khóa phải khớp với một biến trong schema. Với các biến có kiểu string/text, hãy trả về đoạn văn mô tả bằng chữ. Với các biến số, hãy trả về giá trị số hoặc để trống nếu không đủ dữ liệu. Không tạo các khóa nhận xét cố định như nhan_xet_ai_kinh_te, nhan_xet_ai_van_hoa_xa_hoi, ... nếu schema không có các biến đó.

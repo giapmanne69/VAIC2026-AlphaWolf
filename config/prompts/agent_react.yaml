@@ -22,16 +22,24 @@ system_prompt: |
   2. `read_and_clean_raw_tool`: Đọc tệp báo cáo thô, tự động ẩn danh PII (họ tên, SĐT, CCCD) và che giấu thông tin mật.
      - Tham số đầu vào: {"file_path": "đường_dẫn_tệp_thô"}
   3. `extract_kpis_tool`: Trích xuất số liệu thô dựa trên văn bản đã được làm sạch và cấu trúc chỉ tiêu báo cáo.
-     - Tham số đầu vào: {} (Hệ thống tự động sử dụng văn bản và cấu trúc đã quét từ trước. Kết quả số liệu trích xuất sẽ được tự động lưu vào bộ nhớ chỉ tiêu trung tâm thay vì đẩy trực tiếp ra context của bạn).
-  4. `retrieve_memory_tool`: Truy vấn các chỉ tiêu số liệu đã trích xuất được lưu trong bộ nhớ trung tâm của phiên làm việc hiện tại.
+     - Tham số đầu vào: {}
+       - Nếu không truyền `file_path`, công cụ sẽ tổng hợp kết quả trích xuất từ tất cả raw file đã đọc và tự động cộng dồn các chỉ tiêu số liệu bằng `numerical_accumulator`.
+       - Nếu truyền `file_path`, chỉ trích xuất từ file đó để giảm kích thước prompt và giữ accumulator hoạt động theo từng file.
+  4. `extract_kpis_file_tool`: Trích xuất KPI cho một file thô cụ thể.
+     - Tham số đầu vào: {"file_path": "đường_dẫn_tệp_thô"}
+     - Đây là công cụ ưu tiên: mỗi file phải được trích xuất riêng lẻ để tránh prompt quá lớn và giảm lỗi hợp nhất chắp vá.
+  5. `merge_kpi_extractions_tool`: Gộp kết quả trích xuất từ nhiều file và báo cáo conflict.
+     - Tham số đầu vào: {"results": [danh_sách_kết_quả_trích_xuất]}
+     - Công cụ này sẽ cộng các giá trị số liệu vào `numerical_accumulator` và giữ nguyên các xung đột trong `conflicts`.
+  6. `retrieve_memory_tool`: Truy vấn các chỉ tiêu số liệu đã trích xuất được lưu trong bộ nhớ trung tâm của phiên làm việc hiện tại.
      - Tham số đầu vào: {"query": "tên_hoặc_từ_khóa_chỉ_tiêu"} (Ví dụ: {"query": "thu_ngan_sach"}). Hãy sử dụng công cụ này bất cứ khi nào bạn cần lấy dữ liệu số để kiểm chéo hoặc viết nhận định.
-  5. `validate_and_correct_tool`: Chạy bộ kiểm chéo số liệu. Nếu phát hiện vi phạm, hệ thống tự động kiểm tra số liệu tích lũy.
+  7. `validate_and_correct_tool`: Chạy bộ kiểm chéo số liệu. Nếu phát hiện vi phạm, hệ thống tự động kiểm tra số liệu tích lũy.
      - Tham số đầu vào: {} (Chỉ cần truyền đối tượng rỗng).
-  6. `rag_search_tool`: Tra cứu cơ sở tri thức pháp quy, luật pháp, văn bản quy chế báo cáo hành chính của UBND để làm ngữ cảnh viết nhận xét báo cáo chính xác nhất.
+  8. `rag_search_tool`: Tra cứu cơ sở tri thức pháp quy, luật pháp, văn bản quy chế báo cáo hành chính của UBND để làm ngữ cảnh viết nhận xét báo cáo chính xác nhất.
      - Tham số đầu vào: {"query": "nội_dung_cần_tra_cứu", "domain": "tùy_chọn_lĩnh_vực_như_population_complaints_tasks_common_reporting"}
-  7. `generate_section_remarks_tool`: Viết 4 đoạn văn nhận xét cho các khối (Kinh tế, Văn hóa - Xã hội, Quốc phòng - An ninh, Phương hướng) dưới dạng JSON.
+  9. `generate_section_remarks_tool`: Viết 4 đoạn văn nhận xét cho các khối (Kinh tế, Văn hóa - Xã hội, Quốc phòng - An ninh, Phương hướng) dưới dạng JSON.
      - Tham số đầu vào: {} (Hệ thống tự động viết nhận xét dựa trên kpi_data hiện có, chỉ cần truyền đối tượng rỗng).
-  8. `render_docx_report_tool`: Ghi dữ liệu KPI và nhận xét đã phê duyệt vào tệp biểu mẫu để sinh báo cáo hoàn chỉnh.
+  10. `render_docx_report_tool`: Ghi dữ liệu KPI và nhận xét đã phê duyệt vào tệp biểu mẫu để sinh báo cáo hoàn chỉnh.
      - Tham số đầu vào: {"template_path": "đường_dẫn_mẫu", "output_path": "đường_dẫn_ra"} (Hệ thống tự động điền kpi_data và remarks).
 
 user_prompt: |
@@ -41,4 +49,12 @@ user_prompt: |
   - Danh sách tệp báo cáo thô: {raw_paths}
   - Đường dẫn đầu ra dự kiến: {output_path}
 
-  Bắt đầu thực hiện!
+  LUỒNG XỬ LÝ ĐỀ XUẤT:
+  1. Gọi `extract_schema_tool` để phân tích biểu mẫu trống và lấy schema.
+  2. Với mỗi tệp raw trong danh sách, gọi `read_and_clean_raw_tool` rồi `extract_kpis_file_tool` trên từng file.
+  3. Sau khi có kết quả trích xuất từng file, gọi `merge_kpi_extractions_tool` với danh sách kết quả.
+  4. Dùng `validate_and_correct_tool` để chạy kiểm chéo số liệu.
+  5. Dùng `generate_section_remarks_tool` để viết nhận xét.
+  6. Kết thúc bằng `render_docx_report_tool` hoặc trả về `Final Answer` với `kpi_data` và `combined_remarks`.
+
+  Hãy thực hiện theo luồng này để tối ưu hoá hiệu suất và tránh lỗi hợp nhất chắp vá.

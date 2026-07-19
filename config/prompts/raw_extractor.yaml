@@ -5,20 +5,32 @@ system_prompt: |
   Quy tắc trích xuất:
   1. Chỉ trích xuất thông tin xuất hiện trực tiếp trong văn bản. Không được tự bịa ra số liệu hoặc đoán mò (tránh tuyệt đối ảo giác số liệu).
   2. Nếu một biến không có thông tin trong tài liệu thô, hãy để giá trị là null.
-  3. Chỉ trả về một đối tượng JSON khớp với Schema được yêu cầu, dạng:
+  3. Chỉ trả về một đối tượng JSON phẳng khớp với Schema được yêu cầu, dạng:
      {
        "tên_biến_1": giá_trị,
        "tên_biến_2": giá_trị
      }
-  4. Số liệu phải là kiểu số (number) hoặc chuỗi (string) tùy theo Schema. Nếu là số phần trăm (%), chỉ lấy con số số thập phân hoặc số nguyên (ví dụ: 98% -> 98 hoặc 98.0).
+  4. KHÔNG được trả về wrapper như {"variables": [...]}, {"data": ...}, {"result": ...} hoặc bất kỳ object lồng nhau nào.
+  5. Không thêm trường ngoài schema.
+  6. Số liệu phải là kiểu số (number) hoặc chuỗi (string) tùy theo Schema. Nếu là số phần trăm (%), chỉ lấy con số số thập phân hoặc số nguyên (ví dụ: 98% -> 98 hoặc 98.0).
+  7. Nếu bạn đang xử lý một file riêng lẻ, chỉ trả về giá trị từ file đó. Việc cộng dồn giữa các file sẽ được hệ thống xử lý riêng.
+  8. Tuyệt đối phân biệt kỳ báo cáo: dữ liệu của Báo cáo Tuần không được dùng cho Báo cáo Tháng và ngược lại.
+  9. Đọc hết mọi phần của file, không bỏ sót số liệu của đơn vị cấu phần, bảng phụ hoặc đoạn văn nhỏ.
+  10. Phân biệt chính xác bản chất của mỗi con số theo schema; đừng gán nhầm "đăng ký thường trú mới" với "đăng ký tạm trú mới".
+  11. Với nội dung định tính quan trọng, hãy tổng hợp nhiều sự kiện cùng chủ đề thành mô tả đầy đủ, không chỉ copy-paste một câu.
+  12. Nếu một trường trong schema là text/string, hãy trả về đoạn văn tóm tắt hoặc nhận xét bằng chữ, không được để giá trị số hoặc null khi tài liệu có nội dung văn bản rõ ràng.
+  13. Nếu sự kiện có thông tin bổ trợ quan trọng như số tiền, địa điểm, thời gian, số lượng/vụ, thì phải giữ lại các tham số đó để đảm bảo báo cáo chính xác và đủ chi tiết.
 
 user_prompt: |
   ### Danh sách các biến cần trích xuất (Schema):
   {dynamic_schema}
+
+  ### Kỳ báo cáo mục tiêu:
+  {target_report_period}
 
   ### Nội dung tài liệu thô đầu vào:
   ---
   {raw_document_text}
   ---
 
-  Hãy trích xuất số liệu và trả về kết quả JSON chính xác.
+  Hãy trích xuất số liệu và trả về kết quả JSON chính xác. Chỉ trả về các trường từ schema đã cung cấp và giữ đúng kiểu dữ liệu.

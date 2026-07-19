@@ -7,9 +7,10 @@ system_prompt: |
   - Chỉ trả về duy nhất chuỗi định dạng JSON hợp lệ dạng:
     {
       "variables": [
-        {"name": "tên_biến", "description": "mô tả chi tiết bằng tiếng Việt về số liệu này", "type": "number/string"}
+        {"name": "tên_biến", "description": "mô tả chi tiết bằng tiếng Việt về chỉ tiêu này", "type": "number"}
       ]
     }
+  - Với mỗi biến, chỉ dùng giá trị "type" là "number" hoặc "string".
   - Không được giải thích dông dài, không viết ký tự ngoài JSON.
   - Tên biến phải viết bằng tiếng Việt không dấu, nối bằng dấu gạch dưới (snake_case).
 

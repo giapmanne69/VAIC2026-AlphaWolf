@@ -147,16 +147,62 @@ function App() {
     }
   }
 
+  const safeLogMessage = (msg) => {
+    if (msg === null || msg === undefined) return ''
+    if (typeof msg === 'object') {
+      try {
+        return JSON.stringify(msg, null, 2)
+      } catch (e) {
+        return String(msg)
+      }
+    }
+    return String(msg)
+  }
+
+  const formatKpiValue = (val) => {
+    if (val === null || val === undefined) return ''
+    if (typeof val === 'object') {
+      try {
+        return JSON.stringify(val)
+      } catch (e) {
+        return String(val)
+      }
+    }
+    return String(val)
+  }
+
+  const renderSafeText = (value) => {
+    if (value === null || value === undefined) return ''
+    if (typeof value === 'object') {
+      try {
+        return JSON.stringify(value)
+      } catch (e) {
+        console.warn('[DEBUG] renderSafeText failed stringify', value)
+        return String(value)
+      }
+    }
+    return value
+  }
+
+  const debugLogDataMessage = (label, value) => {
+    if (value && typeof value === 'object') {
+      console.warn(`[DEBUG] ${label} is object`, value)
+    }
+  }
+
   const handleAgentEvent = (data) => {
+    debugLogDataMessage('agent event payload', data)
     if (data.status === 'init') {
       setSessionId(data.session_id)
       setLogs((prev) => [...prev, { type: 'info', message: `Tạo phiên làm việc mới thành công (Session ID: ${data.session_id})` }])
     } 
     else if (data.status === 'running') {
       if (data.thought) {
-        setLogs((prev) => [...prev, { type: 'thought', message: data.thought }])
+        debugLogDataMessage('thought', data.thought)
+        setLogs((prev) => [...prev, { type: 'thought', message: safeLogMessage(data.thought) }])
       }
       if (data.action && data.action !== 'Không rõ') {
+        debugLogDataMessage('action_input', data.action_input)
         let friendlyTool = data.action
         if (data.action === 'extract_schema_tool') friendlyTool = 'Quét cấu trúc biểu mẫu trống'
         if (data.action === 'read_and_clean_raw_tool') friendlyTool = 'Bảo mật dữ liệu thô & che giấu PII'
@@ -168,7 +214,8 @@ function App() {
         setLogs((prev) => [...prev, { type: 'action', message: `${friendlyTool} -> Tham số: ${JSON.stringify(data.action_input)}` }])
       }
       if (data.observation) {
-        setLogs((prev) => [...prev, { type: 'observation', message: data.observation }])
+        debugLogDataMessage('observation', data.observation)
+        setLogs((prev) => [...prev, { type: 'observation', message: safeLogMessage(data.observation) }])
       }
     } 
     else if (data.status === 'completed') {
@@ -185,10 +232,7 @@ function App() {
       }
     } 
     else if (data.status === 'error') {
-      setLogs((prev) => [...prev, { type: 'error', message: data.message }])
-      setAgentStatusText('Lỗi trong ReAct Loop')
-      setAgentStatusType('error')
-      setIsRunning(false)
+      setLogs((prev) => [...prev, { type: 'error', message: safeLogMessage(data.message) }])
     }
   }
 
@@ -553,7 +597,7 @@ function App() {
                           {badge}
                         </span>
                       )}
-                      <span className={textClass}>{log.message}</span>
+                      <span className={textClass}>{renderSafeText(log.message)}</span>
                     </div>
                   )
                 })
@@ -610,7 +654,7 @@ function App() {
                         </label>
                         <input 
                           type="text" 
-                          value={val !== null ? val : ''} 
+                          value={formatKpiValue(val)} 
                           onChange={(e) => handleKpiValueChange(key, e.target.value)}
                           className="w-1/3 bg-[#FAF8F0] border border-[#E4E2D3] rounded px-2.5 py-1 text-right text-xs font-bold text-slate-800 focus:outline-none focus:border-[#0B54A8]"
                         />

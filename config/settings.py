@@ -18,6 +18,7 @@ RERANKER_MODEL = os.getenv("RERANKER_MODEL", "bge-reranker-v2-m3")
 DATA_DIR = BASE_DIR / "data"
 CONFIG_DIR = BASE_DIR / "config"
 PROMPTS_DIR = CONFIG_DIR / "prompts"
+POPULATION_BUNDLE_CONFIG_PATH = CONFIG_DIR / "population_bundle.yaml"
 
 # Cấu hình danh mục chuẩn
 MASTER_DATA_DIR = DATA_DIR / "chuan_hoa_hop_nhat"
@@ -38,6 +39,7 @@ RAW_INPUTS_DIR = DATA_DIR / "raw_inputs"
 # 3. Model Parameters
 EMBEDDING_MODEL_NAME = "symanto/sn-xlm-roberta-base-snli-mnli-anli"  # Hoặc 'sentence-transformers/multilingual-e5-large'
 RERANKER_MODEL_NAME = "BAAI/bge-reranker-v2-m3"
+TARGET_REPORT_PERIOD = os.getenv("TARGET_REPORT_PERIOD", "")
 
 # Tạo các thư mục nếu chưa tồn tại
 for folder in [LEGAL_DOCS_DIR, FAISS_DB_DIR, TEMPLATES_DIR, RAW_INPUTS_DIR, PROMPTS_DIR]:

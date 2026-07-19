@@ -12,6 +12,7 @@ from config import settings
 from src.hooks import AnonymizerHook, RedactionHook
 from src.tools import DocParser, Standardizer, RuleEngine, RAGSearchTool
 from src.tools.memory_manager import MemoryManager
+from src.tools.population_bundle import PopulationWorkbookExtractor, PopulationBundleStandardizer
 from src.memory import ShortTermMemory, LongTermMemory
 
 # Đảm bảo thư mục data/ đã được khởi tạo
@@ -38,6 +39,8 @@ class AgenticReportAgent:
             self.rule_engine = RuleEngine()
             self.rag_search = RAGSearchTool()
             self.memory_manager = MemoryManager()
+            self.population_extractor = PopulationWorkbookExtractor()
+            self.population_standardizer = PopulationBundleStandardizer()
             
             self.anonymizer = AnonymizerHook()
             self.redaction = RedactionHook()
@@ -54,7 +57,12 @@ class AgenticReportAgent:
                 "schema": None,
                 "kpi_data": {},
                 "remarks": {},
-                "raw_text_cache": {}
+                "raw_text_cache": {},
+                "file_period_labels": {},
+                "target_report_period": settings.TARGET_REPORT_PERIOD or "Tuần 3",
+                "numerical_accumulator": {},
+                "textual_accumulator": {},
+                "extraction_conflicts": []
             }
             self.session_id = None
             logger.info("Khởi tạo thành công OpenAI Client kết nối FPT AI Factory.")
@@ -102,6 +110,97 @@ class AgenticReportAgent:
             logger.exception("Lỗi xảy ra trong quá trình gọi API LLM:")
             raise e
 
+    def _scan_template_placeholders(self, template_text: str) -> Dict[str, Any]:
+        pattern = re.compile(r"\{\{\s*([^{}]+?)\s*\}\}|\[([^\[\]]+?)\]")
+        variables = []
+        seen = set()
+
+        for line in (template_text or "").splitlines():
+            for match in pattern.finditer(line):
+                name = match.group(1) or match.group(2)
+                if not name:
+                    continue
+                canonical = re.sub(r"[^\w]+", "_", name.strip().lower(), flags=re.UNICODE).strip("_")
+                if not canonical or canonical in seen:
+                    continue
+                seen.add(canonical)
+                variables.append({
+                    "name": canonical,
+                    "description": "",
+                    "type": "string"
+                })
+
+        return {"variables": variables}
+
+    def _validate_schema(self, schema: Any) -> bool:
+        if not isinstance(schema, dict) or "variables" not in schema:
+            return False
+        if not isinstance(schema["variables"], list):
+            return False
+        for variable in schema["variables"]:
+            if not isinstance(variable, dict):
+                return False
+            name = variable.get("name")
+            var_type = variable.get("type")
+            if not isinstance(name, str) or not name.strip():
+                return False
+            if var_type not in ("number", "string"):
+                return False
+        return True
+
+    def _find_schema_variable(self, schema: Dict[str, Any], name: str) -> Dict[str, Any]:
+        if not isinstance(schema, dict):
+            return {}
+        for variable in schema.get("variables", []):
+            if isinstance(variable, dict) and variable.get("name") == name:
+                return variable
+        return {}
+
+    def _get_schema_field_names(self, schema: Dict[str, Any]) -> List[str]:
+        if not isinstance(schema, dict):
+            return []
+        return [var["name"] for var in schema.get("variables", []) if isinstance(var, dict) and var.get("name")]
+
+    def _get_numeric_schema_fields(self, schema: Dict[str, Any]) -> List[str]:
+        if not isinstance(schema, dict):
+            return []
+        return [var["name"] for var in schema.get("variables", []) if isinstance(var, dict) and var.get("type") == "number"]
+
+    def _get_textual_schema_fields(self, schema: Dict[str, Any]) -> List[str]:
+        if not isinstance(schema, dict):
+            return []
+        return [var["name"] for var in schema.get("variables", []) if isinstance(var, dict) and var.get("type") != "number"]
+
+    def _is_period_variable(self, name: str) -> bool:
+        if not isinstance(name, str):
+            return False
+        lower = name.lower()
+        return any(tok in lower for tok in ["ky_bao_cao", "bao_cao", "period", "report", "thoi_gian"])
+
+    def _normalize_string_to_number(self, value: str) -> Any:
+        if value is None or not isinstance(value, str):
+            return None
+        match = re.search(r"(\d+)\s*hộ.*?(\d+)\s*nhân khẩu", value, re.IGNORECASE)
+        if match:
+            return int(match.group(2))
+
+        match = re.search(r"(\d+)\s*nhân khẩu", value, re.IGNORECASE)
+        if match:
+            return int(match.group(1))
+
+        match = re.search(r"(\d+)\s*hộ", value, re.IGNORECASE)
+        if match:
+            return int(match.group(1)) * 3
+
+        digits = re.findall(r"\d+", value)
+        if digits:
+            return int(digits[-1])
+
+        try:
+            return int(float(value.replace(",", "")))
+        except Exception:
+            return None
+
     # --- PIPELINE STAGES (GIỮ CHO TƯƠNG THÍCH NGƯỢC) ---
     def parse_template_schema(self, template_path: str) -> Dict[str, Any]:
         """
@@ -110,13 +209,21 @@ class AgenticReportAgent:
         logger.info(f"[Stage 1] Bắt đầu phân tích biểu mẫu trống tại: {template_path}")
         try:
             template_text = self.parser.parse(template_path)
+            schema = self._scan_template_placeholders(template_text)
             sys_p, user_p = self._load_prompt("template_parser.yaml")
             user_p = user_p.format(template_text=template_text)
-            
             response_text = self._call_llm(sys_p, user_p, response_format="json")
-            schema = json.loads(response_text)
-            
+            try:
+                parsed_schema = json.loads(response_text)
+                if self._validate_schema(parsed_schema):
+                    schema = parsed_schema
+                else:
+                    logger.warning("Schema trả về từ LLM không hợp lệ. Giữ schema placeholder thô từ template.")
+            except Exception as e:
+                logger.warning(f"Không thể parse schema JSON từ LLM: {e}. Giữ schema placeholder thô từ template.")
+
             self.short_memory.set_data("dynamic_schema", schema)
+            self.agent_state["schema"] = schema
             logger.info(f"[Stage 1] Phân tích Schema thành công. Số lượng biến phát hiện: {len(schema.get('variables', []))}")
             return schema
         except Exception as e:
@@ -149,6 +256,7 @@ class AgenticReportAgent:
                 
                 formatted_user_p = user_p.format(
                     dynamic_schema=schema_str,
+                    target_report_period=self.agent_state.get("target_report_period", ""),
                     raw_document_text=masked_text
                 )
                 
@@ -217,6 +325,510 @@ class AgenticReportAgent:
             logger.exception("Lỗi trong Stage 4 (run_validation_and_self_correction):")
             raise e
 
+    def extract_kpis_for_file(self, file_path: str, schema: Dict[str, Any] = None) -> Dict[str, Any]:
+        """Trích xuất KPI riêng cho một file thô."""
+        if not file_path:
+            raise ValueError("file_path là bắt buộc để trích xuất KPI từng file.")
+        schema = schema or self.agent_state.get("schema", {})
+        raw_text = self.agent_state.get("raw_text_cache", {}).get(file_path)
+        if raw_text is None:
+            if Path(file_path).exists():
+                raw_text = self.parser.parse(file_path)
+            else:
+                raise FileNotFoundError(f"Không tìm thấy file raw để trích xuất: {file_path}")
+
+        if Path(file_path).suffix.lower() in {".xlsx", ".xls"}:
+            try:
+                extracted_source = self.population_extractor.extract(Path(file_path), Path(file_path).name)
+                standardized = self.population_standardizer.standardize([extracted_source])
+                return standardized["values"]
+            except Exception as exc:
+                logger.warning(f"Không thể dùng population bundle extractor cho {file_path}: {exc}")
+
+        try:
+            sys_p, user_p = self._load_prompt("subagent_file_extractor.yaml")
+        except FileNotFoundError:
+            sys_p, user_p = self._load_prompt("raw_extractor.yaml")
+
+        formatted_user_p = user_p.format(
+            dynamic_schema=json.dumps(schema, ensure_ascii=False),
+            raw_document_text=raw_text,
+            target_report_period=self.agent_state.get("target_report_period", "")
+        )
+        response = self._call_llm(sys_p, formatted_user_p, response_format="json")
+        doc_data = json.loads(response)
+        doc_data = self._normalize_subagent_extraction_result(doc_data, schema)
+
+        restore_map = self.restore_maps.get(file_path, {})
+        for k, v in list(doc_data.items()):
+            if isinstance(v, str):
+                doc_data[k] = self.anonymizer.deanonymize(v, restore_map)
+
+        doc_data = self._normalize_synonym_keys(doc_data, schema)
+        for k, v in list(doc_data.items()):
+            doc_data[k] = self._normalize_entity_value(k, v, schema)
+
+        doc_data = self._ensure_subagent_output_shape(file_path, doc_data, raw_text, schema)
+        return doc_data
+
+    def _normalize_subagent_extraction_result(self, doc_data: Any, schema: Dict[str, Any]) -> Dict[str, Any]:
+        if isinstance(doc_data, dict):
+            if "variables" in doc_data and isinstance(doc_data["variables"], list):
+                normalized = {}
+                for item in doc_data["variables"]:
+                    if not isinstance(item, dict):
+                        continue
+                    name = item.get("name") or item.get("field") or item.get("key")
+                    value = item.get("value") if "value" in item else item.get("data") or item.get("text") or item.get("result")
+                    if name is not None:
+                        normalized[name] = value
+                return normalized
+
+            if "result" in doc_data and isinstance(doc_data["result"], dict):
+                return doc_data["result"]
+            if "data" in doc_data and isinstance(doc_data["data"], dict):
+                return doc_data["data"]
+
+            fallback_flat = {}
+            for key, value in doc_data.items():
+                if isinstance(value, (str, int, float, bool)):
+                    fallback_flat[key] = value
+            if fallback_flat:
+                return fallback_flat
+
+            return {key: value for key, value in doc_data.items() if not isinstance(value, (list, dict))}
+
+        if isinstance(doc_data, list):
+            normalized = {}
+            for item in doc_data:
+                if not isinstance(item, dict):
+                    continue
+                name = item.get("name") or item.get("field") or item.get("key")
+                value = item.get("value") if "value" in item else item.get("data") or item.get("text") or item.get("result")
+                if name is not None:
+                    normalized[name] = value
+            return normalized
+
+        return {}
+
+    def _normalize_synonym_keys(self, doc_data: Dict[str, Any], schema: Dict[str, Any]) -> Dict[str, Any]:
+        if not isinstance(doc_data, dict) or not isinstance(schema, dict):
+            return doc_data
+
+        canonical = {var["name"]: var for var in schema.get("variables", []) if isinstance(var, dict)}
+        synonym_map = {
+            "thuong_tru_moi": ["khai sinh moi", "tre em moi sinh", "nhap khau", "chuyen den sinh song chinh thuc"],
+            "xoa_thuong_tru": ["khai tu", "cu gia mat", "cat khau", "chuyen di tinh khac", "chuyen di nuoc ngoai dinh cu"]
+        }
+
+        normalized = {}
+        for key, value in doc_data.items():
+            if key in canonical:
+                normalized[key] = value
+                continue
+
+            lower_key = str(key).strip().lower()
+            mapped = None
+            for canonical_name, synonyms in synonym_map.items():
+                if canonical_name == lower_key or any(s in lower_key for s in synonyms):
+                    mapped = canonical_name
+                    break
+
+            if mapped and mapped not in normalized:
+                normalized[mapped] = value
+            else:
+                normalized[key] = value
+
+        return normalized
+
+    def _normalize_entity_value(self, key: str, value: Any, schema: Dict[str, Any]) -> Any:
+        if value is None or not isinstance(value, str):
+            return value
+
+        if self._find_schema_variable(schema, key).get("type") == "number":
+            normalized = self._normalize_string_to_number(value)
+            return normalized if normalized is not None else value
+
+        return value
+
+    def _ensure_subagent_output_shape(self, file_path: str, doc_data: Dict[str, Any], raw_text: str, schema: Dict[str, Any]) -> Dict[str, Any]:
+        if not isinstance(doc_data, dict):
+            doc_data = {}
+
+        file_name = Path(file_path).name
+        result: Dict[str, Any] = {"file_name": file_name}
+
+        def int_or_none(value):
+            if value is None or value == "":
+                return None
+            try:
+                return int(value)
+            except Exception:
+                try:
+                    return int(float(str(value).replace(",", "")))
+                except Exception:
+                    return None
+
+        for variable in schema.get("variables", []):
+            if not isinstance(variable, dict):
+                continue
+            name = variable.get("name")
+            if not name:
+                continue
+
+            if name in doc_data:
+                value = doc_data[name]
+                if variable.get("type") == "number":
+                    result[name] = int_or_none(value)
+                else:
+                    result[name] = str(value).strip() if isinstance(value, str) else value
+                continue
+
+            if self._is_period_variable(name):
+                period_label = self._infer_file_period_label(raw_text, file_name)
+                if period_label == "Kỳ_Tuần":
+                    result[name] = "Tuần 3"
+                elif period_label == "Kỳ_Tháng":
+                    result[name] = "Tháng"
+                else:
+                    result[name] = ""
+                continue
+
+            if variable.get("type") == "number":
+                result[name] = None
+            else:
+                result[name] = ""
+
+        return result
+
+    def _infer_file_period_label(self, raw_text: str, file_name: str = "") -> str:
+        raw_lower = (raw_text or "").lower()
+        filename_lower = (file_name or "").lower()
+        week_pattern = ["tuần 3", "tuan 3", "tuần", "tuan"]
+        month_pattern = ["tháng", "thang"]
+
+        if any(token in filename_lower for token in week_pattern):
+            return "Kỳ_Tuần"
+        if any(token in filename_lower for token in month_pattern):
+            return "Kỳ_Tháng"
+
+        if any(token in raw_lower for token in week_pattern):
+            return "Kỳ_Tuần"
+        if any(token in raw_lower for token in month_pattern):
+            return "Kỳ_Tháng"
+
+        return "unknown"
+
+    def _subagent_cross_check_needs_rerun(self, extracted: Dict[str, Any], schema: Dict[str, Any]) -> bool:
+        if not isinstance(extracted, dict) or not isinstance(schema, dict):
+            return False
+
+        numeric_fields = self._get_numeric_schema_fields(schema)
+        if not numeric_fields:
+            return False
+
+        has_nonzero_numeric = False
+        for field in numeric_fields:
+            value = extracted.get(field)
+            numeric_value = self._normalize_number(value)
+            if numeric_value not in (None, 0):
+                has_nonzero_numeric = True
+                break
+
+        if has_nonzero_numeric:
+            return False
+
+        combined_text = " ".join(
+            str(value).lower() for key, value in extracted.items() if isinstance(value, str)
+        )
+        if any(keyword in combined_text for keyword in ["xử phạt", "tiền phạt", "phạt", "xuly phat", "xu phat"]):
+            return True
+
+        return False
+
+    def _merge_textual_fields(self, extraction_results: List[Dict[str, Any]], schema: Dict[str, Any]) -> Dict[str, str]:
+        text_fields = self._get_textual_schema_fields(schema)
+        summaries = {field: [] for field in text_fields}
+        seen = {field: set() for field in text_fields}
+
+        for result in extraction_results:
+            for field in text_fields:
+                value = str(result.get(field, "")).strip()
+                if not value:
+                    continue
+                if value not in seen[field]:
+                    seen[field].add(value)
+                    summaries[field].append(value)
+
+        return {
+            field: ("\n- " + "\n- ".join(values)) if values else ""
+            for field, values in summaries.items()
+        }
+
+    def merge_extracted_kpi_results(self, extraction_results: List[Dict[str, Any]]) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+        """Gộp kết quả trích xuất KPI từ nhiều file theo priority-first và thu thập conflict."""
+        merged_data: Dict[str, Any] = {}
+        conflicts: List[Dict[str, Any]] = []
+
+        if not extraction_results:
+            return merged_data, conflicts
+
+        valid_results = [r for r in extraction_results if not r.get("_out_of_scope", False)]
+        out_of_scope_files = [r.get("_source_file") for r in extraction_results if r.get("_out_of_scope", False)]
+        if out_of_scope_files:
+            logger.info(f"Các file bị loại khỏi gộp do nằm ngoài phạm vi thời gian: {out_of_scope_files}")
+
+        if not valid_results:
+            valid_results = extraction_results
+
+        schema = self.agent_state.get("schema", {})
+        numeric_fields = set(self._get_numeric_schema_fields(schema))
+        text_fields = set(self._get_textual_schema_fields(schema))
+        period_field = next((field for field in self._get_schema_field_names(schema) if self._is_period_variable(field)), None)
+        has_period_var = period_field is not None
+
+        weekly_results = [r for r in valid_results if has_period_var and str(r.get(period_field, "")).strip().lower() == "tuần 3"]
+        monthly_results = [r for r in valid_results if has_period_var and str(r.get(period_field, "")).strip().lower() == "tháng"]
+
+        if has_period_var and weekly_results and len(weekly_results) != len(valid_results):
+            logger.info("Loại bỏ các kết quả không phải Kỳ Tuần 3 trước khi tổng hợp.")
+            valid_results = weekly_results
+        elif has_period_var and not weekly_results and monthly_results:
+            logger.info("Không tìm thấy kết quả Tuần 3; tiếp tục với các kết quả Kỳ Tháng.")
+            valid_results = monthly_results
+
+        for result in valid_results:
+            source_file = result.get("_source_file")
+            period_label = result.get("_period_label", "unknown")
+            for key, value in result.items():
+                if key.startswith("_") or key in {"file_name", period_field}:
+                    continue
+                if value is None or value == "" or value == "null":
+                    continue
+
+                if key in numeric_fields:
+                    numeric_value = self._normalize_number(value)
+                    if numeric_value is not None:
+                        merged_data[key] = merged_data.get(key, 0) + numeric_value
+                    else:
+                        if key not in merged_data:
+                            merged_data[key] = value
+                        elif str(merged_data[key]) != str(value):
+                            conflicts.append({
+                                "key": key,
+                                "existing_value": merged_data[key],
+                                "new_value": value,
+                                "source_file": source_file,
+                                "period_label": period_label
+                            })
+                elif key in text_fields:
+                    continue
+                else:
+                    if key not in merged_data:
+                        merged_data[key] = value
+                    else:
+                        existing_value = merged_data[key]
+                        if existing_value is None or existing_value == "" or existing_value == "null":
+                            merged_data[key] = value
+                        elif str(existing_value) != str(value):
+                            conflicts.append({
+                                "key": key,
+                                "existing_value": existing_value,
+                                "new_value": value,
+                                "source_file": source_file,
+                                "period_label": period_label
+                            })
+
+        merged_data.update(self._merge_textual_fields(valid_results, schema))
+
+        if has_period_var and (period_field not in merged_data or merged_data.get(period_field) in [None, "", "unknown"]):
+            if weekly_results:
+                merged_data[period_field] = "Tuần 3"
+            elif monthly_results:
+                merged_data[period_field] = "Tháng"
+
+        return merged_data, conflicts
+
+    def _normalize_number(self, value: Any) -> Any:
+        if value is None:
+            return None
+        try:
+            if isinstance(value, str):
+                value = value.replace(".", "").replace(",", "")
+            if isinstance(value, float) or isinstance(value, int):
+                return value
+            return int(value)
+        except Exception:
+            try:
+                return float(value)
+            except Exception:
+                return None
+
+    def accumulate_numerical_values(self, extracted_data: Dict[str, Any]) -> None:
+        accumulator = self.agent_state.get("numerical_accumulator", {})
+        numeric_fields = set(self._get_numeric_schema_fields(self.agent_state.get("schema", {})))
+        for key, value in extracted_data.items():
+            if key in numeric_fields:
+                numeric_value = self._normalize_number(value)
+                if numeric_value is not None:
+                    accumulator[key] = accumulator.get(key, 0) + numeric_value
+        self.agent_state["numerical_accumulator"] = accumulator
+
+    def append_textual_observation(self, category: str, text: str) -> None:
+        if not text or not isinstance(text, str):
+            return
+        self.agent_state.setdefault("textual_accumulator", {}).setdefault(category, []).append(text.strip())
+
+    def accumulate_textual_values(self, extracted_data: Dict[str, Any]) -> None:
+        if not isinstance(extracted_data, dict):
+            return
+        schema = self.agent_state.get("schema", {})
+        textual_fields = set(self._get_textual_schema_fields(schema))
+        textual_acc = self.agent_state.get("textual_accumulator", {})
+        for key, value in extracted_data.items():
+            if key not in textual_fields:
+                continue
+            if not isinstance(value, str) or len(value.strip()) < 20:
+                continue
+            textual_acc.setdefault(key, []).append(value.strip())
+        self.agent_state["textual_accumulator"] = textual_acc
+
+    def get_textual_context(self) -> str:
+        parts = []
+        for cat, items in self.agent_state.get("textual_accumulator", {}).items():
+            if items:
+                parts.append(f"=== {cat} ===")
+                parts.extend(items)
+        return "\n\n".join(parts)
+
+    def _build_combined_remarks(self, remarks_dict: Dict[str, Any]) -> str:
+        if not isinstance(remarks_dict, dict):
+            remarks_dict = {}
+        sections = []
+        for key, value in remarks_dict.items():
+            if not isinstance(value, str) or not value.strip():
+                continue
+            label = key.replace("_", " ").strip()
+            sections.append(f"=== {label.upper()} ===\n{value.strip()}")
+        if not sections:
+            return ""
+        return "\n\n".join(sections)
+
+    def _normalize_schema_remarks(self, remarks_dict: Dict[str, Any], schema: Dict[str, Any]) -> Dict[str, Any]:
+        if not isinstance(remarks_dict, dict):
+            return {}
+
+        textual_fields = self._get_textual_schema_fields(schema)
+        if not textual_fields:
+            return {k: v for k, v in remarks_dict.items() if isinstance(v, str) and v.strip()}
+
+        normalized = {}
+        for field in textual_fields:
+            value = remarks_dict.get(field)
+            if isinstance(value, str) and value.strip():
+                normalized[field] = value.strip()
+            elif field in remarks_dict and remarks_dict[field] is not None:
+                normalized[field] = str(remarks_dict[field]).strip()
+
+        for key, value in remarks_dict.items():
+            if isinstance(value, str) and value.strip() and key not in normalized:
+                normalized[key] = value.strip()
+
+        return normalized
+
+    def _build_render_context_from_schema(self, schema: Dict[str, Any], kpi_data: Dict[str, Any], remarks_dict: Dict[str, Any]) -> Dict[str, Any]:
+        render_context: Dict[str, Any] = {}
+        if not isinstance(kpi_data, dict):
+            kpi_data = {}
+        if not isinstance(remarks_dict, dict):
+            remarks_dict = {}
+
+        for variable in schema.get("variables", []):
+            if not isinstance(variable, dict):
+                continue
+            name = variable.get("name")
+            if not name:
+                continue
+            if name in kpi_data and kpi_data[name] not in [None, "", "null"]:
+                render_context[name] = kpi_data[name]
+            elif name in remarks_dict and remarks_dict[name] not in [None, "", "null"]:
+                render_context[name] = remarks_dict[name]
+            elif variable.get("type") == "number":
+                render_context[name] = None
+            else:
+                render_context[name] = ""
+
+        for key, value in remarks_dict.items():
+            if key not in render_context and value not in [None, "", "null"]:
+                render_context[key] = value
+
+        for key, value in list(render_context.items()):
+            if value is None or value == "None" or value == "null":
+                render_context[key] = ""
+
+        return render_context
+
+    def _merge_remarks_into_kpi_data(self, kpi_data: Dict[str, Any], remarks_dict: Dict[str, Any], schema: Dict[str, Any]) -> Dict[str, Any]:
+        if not isinstance(kpi_data, dict):
+            kpi_data = {}
+        if not isinstance(remarks_dict, dict):
+            return kpi_data
+
+        merged = kpi_data.copy()
+        textual_fields = set(self._get_textual_schema_fields(schema))
+
+        for key, value in remarks_dict.items():
+            if key in textual_fields and (merged.get(key) in [None, "", "null"] or key not in merged):
+                if isinstance(value, str) and value.strip():
+                    merged[key] = value.strip()
+            elif key not in merged and isinstance(value, str) and value.strip():
+                merged[key] = value.strip()
+
+        return merged
+
+    def run_structural_reducer(self, schema: Dict[str, Any], extraction_results: List[Dict[str, Any]], merged_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Tầng 2: dùng prompt schema-driven để tạo object JSON duy nhất và tích lũy dữ liệu."""
+        if not isinstance(schema, dict):
+            return merged_data or {}
+
+        try:
+            sys_p, user_p = self._load_prompt("structural_reducer.yaml")
+        except FileNotFoundError:
+            logger.warning("Không tìm thấy prompt structural_reducer.yaml; fallback về merge_data thông thường.")
+            return merged_data or {}
+
+        formatted_user_p = user_p.format(
+            schema=json.dumps(schema, ensure_ascii=False, indent=2),
+            target_report_period=self.agent_state.get("target_report_period", "Tuần 3"),
+            extraction_results=json.dumps(extraction_results, ensure_ascii=False, indent=2),
+            merged_data=json.dumps(merged_data, ensure_ascii=False, indent=2)
+        )
+
+        response = self._call_llm(sys_p, formatted_user_p, response_format="json")
+        try:
+            reduced = json.loads(response)
+        except Exception:
+            return merged_data or {}
+
+        if not isinstance(reduced, dict):
+            return merged_data or {}
+
+        normalized = {}
+        for variable in schema.get("variables", []):
+            if not isinstance(variable, dict):
+                continue
+            name = variable.get("name")
+            if not name:
+                continue
+            if name in reduced and reduced[name] is not None and reduced[name] != "":
+                normalized[name] = reduced[name]
+            elif name in merged_data and merged_data[name] is not None and merged_data[name] != "":
+                normalized[name] = merged_data[name]
+            else:
+                normalized[name] = reduced.get(name, "")
+
+        return normalized
+
     def generate_final_report(self, kpi_data: Dict[str, Any], template_path: str, output_path: str, rag_context: str = "") -> str:
         """
         Stage 6: Viết nhận xét và chèn dữ liệu trực tiếp vào tệp tin biểu mẫu trống.
@@ -230,9 +842,16 @@ class AgenticReportAgent:
             if style_preferences:
                 style_str = "\nThói quen văn phong ưa thích:\n" + "\n".join([f"- {k}: {v}" for k, v in style_preferences.items()])
                 
+            template_context = self.parser.parse(template_path) if template_path and Path(template_path).exists() else ""
+            schema = self.agent_state.get("schema", {}) or {}
+            textual_fields = self._get_textual_schema_fields(schema)
             formatted_user_p = user_p.format(
                 kpi_data=json.dumps(kpi_data, ensure_ascii=False, indent=2),
-                rag_context=rag_context if rag_context else "Không có văn cảnh quy định cụ thể."
+                rag_context=rag_context if rag_context else "Không có văn cảnh quy định cụ thể.",
+                textual_context=self.get_textual_context(),
+                template_context=template_context,
+                schema=json.dumps(schema, ensure_ascii=False, indent=2),
+                textual_fields=json.dumps(textual_fields, ensure_ascii=False)
             )
             if style_str:
                 formatted_user_p += style_str
@@ -243,33 +862,14 @@ class AgenticReportAgent:
                 remarks_dict = json.loads(response_text)
             except Exception as e:
                 logger.error(f"Không thể parse JSON từ phản hồi nhận xét. Thử dùng text thô làm mặc định: {str(e)}")
-                remarks_dict = {
-                    "nhan_xet_ai_kinh_te": response_text,
-                    "nhan_xet_ai_van_hoa_xa_hoi": response_text,
-                    "nhan_xet_ai_quoc_phong_an_ninh": response_text,
-                    "nhan_xet_ai_phuong_huong": response_text
-                }
-            
-            # Gom tất cả nhận xét thành 1 văn bản để hiển thị ở UI
-            combined_remarks = (
-                f"=== KHỐI KINH TẾ ===\n{remarks_dict.get('nhan_xet_ai_kinh_te', '')}\n\n"
-                f"=== KHỐI VĂN HÓA - XÃ HỘI ===\n{remarks_dict.get('nhan_xet_ai_van_hoa_xa_hoi', '')}\n\n"
-                f"=== KHỐI QUỐC PHÒNG - AN NINH ===\n{remarks_dict.get('nhan_xet_ai_quoc_phong_an_ninh', '')}\n\n"
-                f"=== PHƯƠNG HƯỚNG KỲ TỚI ===\n{remarks_dict.get('nhan_xet_ai_phuong_huong', '')}"
-            )
-            
-            # Gộp ngữ cảnh và ghi tệp Word
-            render_context = kpi_data.copy()
-            
-            # Sửa lỗi in chữ None/null ra file Word
-            for k, v in list(render_context.items()):
-                if v is None or v == "None" or v == "null":
-                    render_context[k] = ""
-                    
-            # Đưa toàn bộ các nhận xét riêng lẻ vào ngữ cảnh render
-            render_context.update(remarks_dict)
+                remarks_dict = {"nhan_xet_ai": response_text}
+
+            remarks_dict = self._normalize_schema_remarks(remarks_dict, schema)
+            combined_remarks = self._build_combined_remarks(remarks_dict)
+
+            render_context = self._build_render_context_from_schema(schema, kpi_data, remarks_dict)
             render_context["nhan_xet_ai"] = combined_remarks
-            
+
             logger.info(f"Đang tiến hành điền mẫu với docxtpl...")
             doc = DocxTemplate(template_path)
             doc.render(render_context)
@@ -306,6 +906,8 @@ class AgenticReportAgent:
                 masked_text = cache_val["masked_text"]
                 self.restore_maps[file_path] = cache_val["restore_map"]
                 self.agent_state["raw_text_cache"][file_path] = masked_text
+                if cache_val.get("period_label"):
+                    self.agent_state["file_period_labels"][file_path] = cache_val["period_label"]
                 logger.info(f"Đọc tệp tin {file_path} từ Cache thành công.")
                 return {
                     "masked_text": masked_text[:1000] + "\n... [Văn bản được rút gọn trong ReAct Context] ...",
@@ -321,11 +923,15 @@ class AgenticReportAgent:
             masked_text, restore_map = self.anonymizer.anonymize(raw_text)
             self.restore_maps[file_path] = restore_map
             self.agent_state["raw_text_cache"][file_path] = masked_text
+            period_label = self._infer_file_period_label(raw_text, file_path)
+            self.agent_state["file_period_labels"][file_path] = period_label
+            logger.info(f"Đã gắn nhãn kỳ báo cáo cho file {Path(file_path).name}: {period_label}")
             
             # Save to Cache
             self.memory_manager.cache_set(file_path, {
                 "masked_text": masked_text,
-                "restore_map": restore_map
+                "restore_map": restore_map,
+                "period_label": period_label
             })
             
             # Update task progress
@@ -350,33 +956,32 @@ class AgenticReportAgent:
             }
             
         elif tool_name == "extract_kpis_tool":
-            raw_text = tool_input.get("raw_text")
-            if not raw_text:
-                raw_text_cache = self.agent_state.get("raw_text_cache", {})
-                if raw_text_cache:
-                    raw_text_sections = []
-                    for path, text in raw_text_cache.items():
-                        raw_text_sections.append(f"\n\n--- [FILE: {Path(path).name}] ---\n{text}")
-                    raw_text = "\n".join(raw_text_sections)
-                else:
-                    raw_text = ""
+            file_path = tool_input.get("file_path")
             schema = tool_input.get("schema") or self.agent_state.get("schema", {})
-            
-            sys_p, user_p = self._load_prompt("raw_extractor.yaml")
-            formatted_user_p = user_p.format(
-                dynamic_schema=json.dumps(schema, ensure_ascii=False),
-                raw_document_text=raw_text
-            )
-            response = self._call_llm(sys_p, formatted_user_p, response_format="json")
-            doc_data = json.loads(response)
-            
-            for file_path, restore_map in self.restore_maps.items():
-                for k, v in list(doc_data.items()):
-                    if isinstance(v, str):
-                        doc_data[k] = self.anonymizer.deanonymize(v, restore_map)
-                        
+            extracted_data: Dict[str, Any] = {}
+            raw_text_cache = self.agent_state.get("raw_text_cache", {})
+
+            if file_path:
+                extracted_data = self.extract_kpis_for_file(file_path, schema)
+                source_file = file_path
+            else:
+                extraction_results = []
+                for path in raw_text_cache.keys():
+                    extraction_results.append(self.extract_kpis_for_file(path, schema))
+
+                if not extraction_results:
+                    raise ValueError("Không có raw text để trích xuất KPI.")
+
+                merged_data, conflicts = self.merge_extracted_kpi_results(extraction_results)
+                self.agent_state["extraction_conflicts"] = conflicts
+                extracted_data = merged_data
+                source_file = "multiple_files" if len(raw_text_cache) > 1 else (next(iter(raw_text_cache.keys())) if raw_text_cache else "unknown_source")
+
+            self.accumulate_numerical_values(extracted_data)
+            self.accumulate_textual_values(extracted_data)
+
             # Lưu vào MemoryManager và cập nhật kpi_data
-            for key, val in doc_data.items():
+            for key, val in extracted_data.items():
                 unit = None
                 if schema and "variables" in schema:
                     for var in schema["variables"]:
@@ -391,14 +996,7 @@ class AgenticReportAgent:
                             elif "ngày" in desc:
                                 unit = "ngày"
                             break
-                            
-                if len(self.restore_maps) == 1:
-                    source_file = next(iter(self.restore_maps.keys()))
-                elif len(self.restore_maps) > 1:
-                    source_file = "multiple_files"
-                else:
-                    source_file = "unknown_source"
-                
+
                 if self.session_id:
                     self.memory_manager.save_indicator(
                         task_id=self.session_id,
@@ -408,13 +1006,42 @@ class AgenticReportAgent:
                         source_file=source_file,
                         confidence=1.0
                     )
-                    
-            self.agent_state["kpi_data"].update(doc_data)
-            
+
+            self.agent_state["kpi_data"].update(extracted_data)
+
+            return extracted_data
+
+        elif tool_name == "extract_kpis_file_tool":
+            file_path = tool_input.get("file_path")
+            schema = tool_input.get("schema") or self.agent_state.get("schema", {})
+            return self.extract_kpis_for_file(file_path, schema)
+
+        elif tool_name == "merge_kpi_extractions_tool":
+            extraction_results = tool_input.get("results", [])
+            if not isinstance(extraction_results, list):
+                raise ValueError("Results phải là danh sách các kết quả trích xuất KPI từ từng file.")
+
+            merged_data, conflicts = self.merge_extracted_kpi_results(extraction_results)
+            self.agent_state["extraction_conflicts"] = conflicts
+            self.agent_state["kpi_data"].update(merged_data)
+            self.accumulate_numerical_values(merged_data)
+            self.accumulate_textual_values(merged_data)
+
+            source_file = "multiple_files" if len(extraction_results) > 1 else "unknown_source"
+            for key, val in merged_data.items():
+                if self.session_id:
+                    self.memory_manager.save_indicator(
+                        task_id=self.session_id,
+                        indicator_name=key,
+                        value=val,
+                        unit=None,
+                        source_file=source_file,
+                        confidence=1.0
+                    )
+
             return {
-                "status": "success",
-                "message": f"Đã trích xuất số liệu và lưu {len(doc_data)} chỉ tiêu vào bộ nhớ nghiệp vụ thành công.",
-                "extracted_keys": list(doc_data.keys())
+                "merged_kpi_data": merged_data,
+                "conflicts": conflicts
             }
             
         elif tool_name == "retrieve_memory_tool":
@@ -445,6 +1072,8 @@ class AgenticReportAgent:
             
         elif tool_name == "generate_section_remarks_tool":
             kpi_data = tool_input.get("kpi_data") or self.agent_state.get("kpi_data", {})
+            template_path = tool_input.get("template_path") or self.agent_state.get("template_path")
+            schema = tool_input.get("schema") or self.agent_state.get("schema", {}) or {}
             sys_p, user_p = self._load_prompt("report_commenter.yaml")
             
             effective_rag_context = rag_context
@@ -457,12 +1086,20 @@ class AgenticReportAgent:
                         context_blocks.append(res)
                 effective_rag_context = "\n\n".join(context_blocks) if context_blocks else "Không có văn cảnh quy định cụ thể."
 
+            textual_context = self.get_textual_context() or "Không có ngữ cảnh văn bản tích lũy."
+            template_context = self.parser.parse(template_path) if template_path and Path(template_path).exists() else ""
+            textual_fields = self._get_textual_schema_fields(schema)
             formatted_user_p = user_p.format(
                 kpi_data=json.dumps(kpi_data, ensure_ascii=False, indent=2),
-                rag_context=effective_rag_context
+                rag_context=effective_rag_context,
+                textual_context=textual_context,
+                template_context=template_context,
+                schema=json.dumps(schema, ensure_ascii=False, indent=2),
+                textual_fields=json.dumps(textual_fields, ensure_ascii=False)
             )
             response = self._call_llm(sys_p, formatted_user_p, response_format="json")
-            return json.loads(response)
+            remarks_dict = json.loads(response)
+            return self._normalize_schema_remarks(remarks_dict, schema)
             
         elif tool_name == "render_docx_report_tool":
             template_path = tool_input.get("template_path")
@@ -470,12 +1107,10 @@ class AgenticReportAgent:
             remarks_dict = tool_input.get("remarks_dict") or self.agent_state.get("remarks", {})
             output_path = tool_input.get("output_path")
             
-            combined_remarks = (
-                f"=== KHỐI KINH TẾ ===\n{remarks_dict.get('nhan_xet_ai_kinh_te', '')}\n\n"
-                f"=== KHỐI VĂN HÓA - XÃ HỘI ===\n{remarks_dict.get('nhan_xet_ai_van_hoa_xa_hoi', '')}\n\n"
-                f"=== KHỐI QUỐC PHÒNG - AN NINH ===\n{remarks_dict.get('nhan_xet_ai_quoc_phong_an_ninh', '')}\n\n"
-                f"=== PHƯƠNG HƯỚNG KỲ TỚI ===\n{remarks_dict.get('nhan_xet_ai_phuong_huong', '')}"
-            )
+            self._assert_required_output_fields(kpi_data)
+            self._validate_output_against_memory(kpi_data)
+
+            combined_remarks = self._build_combined_remarks(remarks_dict)
             
             render_context = kpi_data.copy()
             for k, v in list(render_context.items()):
@@ -501,173 +1136,224 @@ class AgenticReportAgent:
         else:
             raise ValueError(f"Không tìm thấy công cụ nghiệp vụ: {tool_name}")
 
-    def run_react_agent_generator(
+    def run_file_subagent(self, file_path: str, schema: Dict[str, Any]) -> Dict[str, Any]:
+        """Chạy subagent cho một file raw, bao gồm đọc/làm sạch và trích xuất KPI từng file."""
+        self.execute_agent_tool("read_and_clean_raw_tool", {"file_path": file_path})
+        result = self.execute_agent_tool("extract_kpis_file_tool", {"file_path": file_path, "schema": schema})
+
+        raw_text = self.parser.parse(file_path)
+        raw_period = self._infer_raw_data_period(raw_text)
+        self.agent_state["file_period_labels"][file_path] = raw_period
+
+        if isinstance(result, dict) and self._subagent_cross_check_needs_rerun(result, schema):
+            logger.warning(f"Subagent cần quét lại file do phát hiện dấu hiệu an ninh/pháp luật nhưng chưa có số liệu định lượng: {Path(file_path).name}")
+            retry_result = self.execute_agent_tool("extract_kpis_file_tool", {"file_path": file_path, "schema": schema})
+            if isinstance(retry_result, dict):
+                result = retry_result
+
+        if isinstance(result, dict):
+            result["_source_file"] = Path(file_path).name
+            result["_period_label"] = self.agent_state.get("file_period_labels", {}).get(file_path, "unknown")
+            result["_raw_data_period"] = raw_period
+            result["_out_of_scope"] = self._is_out_of_scope(raw_period, self.agent_state.get("target_report_period", "Tuần 3"))
+        return result
+
+
+    def _infer_raw_data_period(self, raw_text: str) -> str:
+        raw_lower = (raw_text or "").lower()
+        if "tuần 3" in raw_lower or "tuan 3" in raw_lower:
+            return "Tuần 3"
+        if "tuần" in raw_lower or "tuan" in raw_lower:
+            return "Tuần"
+        if "tháng" in raw_lower or "thang" in raw_lower:
+            return "Tháng"
+        return "unknown"
+
+    def _is_out_of_scope(self, raw_period: str, target_period: str) -> bool:
+        if not raw_period or raw_period == "unknown":
+            return False
+        raw_period = raw_period.strip().lower()
+        target_period = target_period.strip().lower()
+        if target_period == raw_period:
+            return False
+        return True
+
+    def _assert_required_output_fields(self, kpi_data: Dict[str, Any]) -> None:
+        schema = self.agent_state.get("schema") or {}
+        required_fields = []
+        for var in schema.get("variables", []):
+            if isinstance(var, dict) and var.get("name"):
+                required_fields.append(var["name"])
+
+        if not required_fields:
+            return
+
+        missing = []
+        for field in required_fields:
+            value = kpi_data.get(field)
+            if value is None or value == "" or str(value).strip().lower() in ["null", "undefined"]:
+                missing.append(field)
+
+        if missing:
+            raise ValueError(f"Thiếu trường dữ liệu bắt buộc trước khi xuất báo cáo: {', '.join(missing)}")
+
+    def _validate_output_against_memory(self, kpi_data: Dict[str, Any]) -> None:
+        if not self.session_id:
+            return
+        indicators = self.memory_manager.list_indicators(self.session_id)
+        mismatches = []
+        for ind in indicators:
+            name = ind["indicator_name"]
+            if name in kpi_data:
+                expected = str(ind["value"]).strip()
+                actual = str(kpi_data.get(name, "")).strip()
+                if actual != expected:
+                    mismatches.append({
+                        "indicator": name,
+                        "expected": expected,
+                        "actual": actual,
+                        "source_file": ind.get("source_file")
+                    })
+        if mismatches:
+            raise ValueError(f"Phát hiện không khớp giữa kpi_data và log chỉ tiêu trung gian: {json.dumps(mismatches, ensure_ascii=False)}")
+
+    def run_multi_agent_pipeline(
         self, template_path: str, raw_paths: List[str], output_path: str, rag_context: str = "", session_id: str = None
     ) -> Generator[Dict[str, Any], None, None]:
-        """
-        Khởi chạy vòng lặp ReAct tự trị và sinh ra (yield) từng bước logs, thoughts, actions
-        dưới dạng JSON string phục vụ Server-Sent Events (SSE) hiển thị tư duy AI lên React.
-        """
-        logger.info("BẮT ĐẦU VÒNG LẶP REACT AGENT TỰ TRỊ")
-        
+        """Chạy supervisor pipeline với các subagent xử lý từng file riêng biệt."""
+        logger.info("BẮT ĐẦU MULTI-AGENT SUPERVISOR PIPELINE")
+
         import uuid
         self.session_id = session_id or str(uuid.uuid4())
         self.memory_manager.create_task(self.session_id, len(raw_paths))
-        
-        sys_p, user_p = self._load_prompt("agent_react.yaml")
-        formatted_user_p = user_p.format(
-            template_path=template_path,
-            raw_paths=json.dumps(raw_paths, ensure_ascii=False),
-            output_path=output_path
-        )
-        
-        history = [
-            {"role": "system", "content": sys_p},
-            {"role": "user", "content": formatted_user_p}
-        ]
-        
-        step_counter = 1
-        max_steps = 15
-        
-        # Biến số trạng thái toàn cục trong phiên chạy của Tác tử
+
         self.agent_state = {
             "schema": None,
             "kpi_data": {},
             "remarks": {},
-            "raw_text_cache": {}
+            "raw_text_cache": {},
+            "file_period_labels": {},
+            "numerical_accumulator": {},
+            "textual_accumulator": {},
+            "extraction_conflicts": []
         }
-        
-        while step_counter <= max_steps:
-            logger.info(f"Vòng lặp ReAct - Bước {step_counter}")
-            
-            # Gọi LLM để lấy bước suy nghĩ tiếp theo
-            try:
-                response = self.client.chat.completions.create(
-                    model=settings.LLM_MODEL,
-                    messages=history,
-                    temperature=0.1,
-                    max_tokens=4096
-                )
-                content = response.choices[0].message.content
-                logger.info(f"LLM phản hồi: \n{content}")
-            except Exception as e:
-                logger.exception("Lỗi khi kết nối FPT AI Factory trong ReAct Loop:")
-                yield {"status": "error", "message": f"Lỗi kết nối FPT AI Factory: {str(e)}"}
-                return
-                
-            # Thêm phản hồi của LLM vào lịch sử hội thoại
-            history.append({"role": "assistant", "content": content})
-            
-            # Parse nội dung phản hồi (Thought, Action, Action Input, Final Answer)
-            thought = ""
-            action = None
-            action_input = {}
-            final_answer = None
-            
-            thought_match = re.search(r"Thought:\s*(.*)", content, re.IGNORECASE)
-            if thought_match:
-                thought = thought_match.group(1).strip()
-                
-            action_match = re.search(r"Action:\s*(\w+)", content, re.IGNORECASE)
-            action_input_match = re.search(r"Action Input:\s*(\{.*?\})", content, re.DOTALL)
-            
-            final_match = re.search(r"Final Answer:\s*(\{.*?\})", content, re.DOTALL)
-            if not final_match:
-                final_match = re.search(r"Final Answer:\s*(.*)", content, re.IGNORECASE)
-                if final_match:
-                    try:
-                        final_answer = json.loads(final_match.group(1).strip())
-                    except Exception:
-                        final_answer = {"status": "success", "message": final_match.group(1).strip()}
-            else:
-                try:
-                    final_answer = json.loads(final_match.group(1).strip())
-                except Exception:
-                    final_answer = {"status": "success"}
 
-            # Trường hợp 1: Tác tử đưa ra Final Answer (Hoàn thành nhiệm vụ)
-            if final_answer:
-                if not isinstance(final_answer, dict):
-                    final_answer = {"status": "success", "message": str(final_answer)}
-                if "kpi_data" not in final_answer or not final_answer["kpi_data"]:
-                    final_answer["kpi_data"] = self.agent_state["kpi_data"]
-                if "combined_remarks" not in final_answer or not final_answer["combined_remarks"]:
-                    rem = self.agent_state.get("remarks", {})
-                    combined_remarks = (
-                        f"=== KHỐI KINH TẾ ===\n{rem.get('nhan_xet_ai_kinh_te', '')}\n\n"
-                        f"=== KHỐI VĂN HÓA - XÃ HỘI ===\n{rem.get('nhan_xet_ai_van_hoa_xa_hoi', '')}\n\n"
-                        f"=== KHỐI QUỐC PHÒNG - AN NINH ===\n{rem.get('nhan_xet_ai_quoc_phong_an_ninh', '')}\n\n"
-                        f"=== PHƯƠNG HƯỚNG KỲ TỚI ===\n{rem.get('nhan_xet_ai_phuong_huong', '')}"
-                    )
-                    final_answer["combined_remarks"] = combined_remarks
-                yield {
-                    "status": "completed",
-                    "step": step_counter,
-                    "thought": thought or "Tôi đã hoàn thành toàn bộ mục tiêu.",
-                    "final_answer": final_answer
-                }
-                return
-                
-            # Trường hợp 2: Tác tử gọi công cụ
-            if action_match and action_input_match:
-                action = action_match.group(1).strip()
-                try:
-                    action_input = json.loads(action_input_match.group(1).strip())
-                except Exception as e:
-                    observation = f"Lỗi cú pháp JSON ở Action Input: {str(e)}"
-                    history.append({"role": "user", "content": f"Observation: {observation}"})
-                    yield {
-                        "status": "running",
-                        "step": step_counter,
-                        "thought": thought,
-                        "action": action,
-                        "action_input": action_input_match.group(1).strip(),
-                        "observation": observation
-                    }
-                    step_counter += 1
-                    continue
+        step_counter = 1
+        try:
+            sys_p, user_p = self._load_prompt("supervisor.yaml")
+            formatted_user_p = user_p.format(
+                template_path=template_path,
+                raw_paths=json.dumps(raw_paths, ensure_ascii=False),
+                output_path=output_path
+            )
+            plan_text = self._call_llm(sys_p, formatted_user_p, response_format="text")
+            yield {
+                "status": "running",
+                "step": step_counter,
+                "thought": "Supervisor lập kế hoạch và điều phối các subagent.",
+                "action": "supervisor_plan",
+                "action_input": {
+                    "template_path": template_path,
+                    "raw_paths": raw_paths,
+                    "output_path": output_path
+                },
+                "observation": plan_text
+            }
+        except Exception as e:
+            logger.warning(f"Không thể lấy kế hoạch supervisor: {e}")
+            yield {
+                "status": "running",
+                "step": step_counter,
+                "thought": "Supervisor bắt đầu điều phối mà không cần plan chi tiết từ LLM.",
+                "action": "supervisor_plan",
+                "action_input": {},
+                "observation": "Không có kế hoạch chi tiết từ supervisor prompt."
+            }
+        step_counter += 1
 
-                # Thực thi công cụ nghiệp vụ
-                try:
-                    observation_result = self.execute_agent_tool(action, action_input, rag_context)
-                    
-                    # Cập nhật trạng thái Agent để theo dõi
-                    if action == "extract_schema_tool":
-                        self.agent_state["schema"] = observation_result
-                    elif action == "extract_kpis_tool":
-                        self.agent_state["kpi_data"].update(observation_result)
-                    elif action == "generate_section_remarks_tool":
-                        self.agent_state["remarks"] = observation_result
-                        
-                    observation = json.dumps(observation_result, ensure_ascii=False)
-                except Exception as e:
-                    logger.exception(f"Lỗi khi thực thi công cụ {action}:")
-                    observation = f"Lỗi thực thi công cụ {action}: {str(e)}"
-                
-                # Trả kết quả quan sát cho LLM ở lượt tiếp theo
-                history.append({"role": "user", "content": f"Observation: {observation}"})
-                
-                yield {
-                    "status": "running",
-                    "step": step_counter,
-                    "thought": thought,
-                    "action": action,
-                    "action_input": action_input,
-                    "observation": observation
-                }
-            else:
-                # Fallback: Nếu mô hình phản hồi không đúng ReAct format
-                observation = "Hệ thống: Vui lòng sử dụng đúng định dạng ReAct (Thought, Action, Action Input hoặc Final Answer)."
-                history.append({"role": "user", "content": f"Observation: {observation}"})
-                yield {
-                    "status": "running",
-                    "step": step_counter,
-                    "thought": content,
-                    "action": "Không rõ",
-                    "action_input": {},
-                    "observation": observation
-                }
-                
+        schema = self.execute_agent_tool("extract_schema_tool", {"template_path": template_path})
+        yield {
+            "status": "running",
+            "step": step_counter,
+            "thought": "Đã phân tích biểu mẫu trống và xác định schema.",
+            "action": "extract_schema_tool",
+            "action_input": {"template_path": template_path},
+            "observation": schema
+        }
+        step_counter += 1
+
+        extraction_results = []
+        for raw_path in raw_paths:
+            subagent_result = self.run_file_subagent(raw_path, schema)
+            extraction_results.append(subagent_result)
+            yield {
+                "status": "running",
+                "step": step_counter,
+                "thought": f"Subagent đã xử lý file: {Path(raw_path).name}.",
+                "action": "extract_kpis_file_tool",
+                "action_input": {"file_path": raw_path},
+                "observation": subagent_result
+            }
             step_counter += 1
-            
-        yield {"status": "error", "message": "Vượt quá giới hạn bước suy nghĩ tối đa của Tác tử."}
+
+        merge_obs = self.execute_agent_tool("merge_kpi_extractions_tool", {"results": extraction_results})
+        merged_data = merge_obs.get("merged_kpi_data", {}) if isinstance(merge_obs, dict) else {}
+        reducer_obs = self.run_structural_reducer(schema, extraction_results, merged_data)
+        if isinstance(reducer_obs, dict):
+            self.agent_state["kpi_data"] = reducer_obs
+        yield {
+            "status": "running",
+            "step": step_counter,
+            "thought": "Đã gộp kết quả trích xuất KPI từ tất cả subagent và chuyển sang tầng 2 để tích lũy theo schema.",
+            "action": "structural_reducer",
+            "action_input": {"results": extraction_results},
+            "observation": reducer_obs
+        }
+        step_counter += 1
+
+        validate_obs = self.execute_agent_tool("validate_and_correct_tool", {})
+        yield {
+            "status": "running",
+            "step": step_counter,
+            "thought": "Đã kiểm tra chéo số liệu và ghi nhận lỗi nếu có.",
+            "action": "validate_and_correct_tool",
+            "action_input": {},
+            "observation": validate_obs
+        }
+        step_counter += 1
+
+        self.agent_state["template_path"] = template_path
+        remarks_obs = self.execute_agent_tool("generate_section_remarks_tool", {"template_path": template_path, "schema": schema})
+        self.agent_state["remarks"] = remarks_obs
+        self.agent_state["kpi_data"] = self._merge_remarks_into_kpi_data(self.agent_state["kpi_data"], remarks_obs, schema)
+        yield {
+            "status": "running",
+            "step": step_counter,
+            "thought": "Đã tạo nhận xét báo cáo dựa trên dữ liệu hiện tại.",
+            "action": "generate_section_remarks_tool",
+            "action_input": {},
+            "observation": remarks_obs
+        }
+        step_counter += 1
+
+        final_answer = {
+            "status": "success",
+            "kpi_data": self.agent_state["kpi_data"],
+            "remarks": remarks_obs,
+            "combined_remarks": self._build_combined_remarks(remarks_obs),
+            "render_context": self._build_render_context_from_schema(self.agent_state.get("schema", {}) or {}, self.agent_state.get("kpi_data", {}), remarks_obs),
+            "output_path": output_path,
+            "conflicts": self.agent_state.get("extraction_conflicts", [])
+        }
+
+        yield {
+            "status": "completed",
+            "step": step_counter,
+            "thought": "Pipeline supervisor + subagent hoàn tất.",
+            "final_answer": final_answer
+        }
+
+    def run_react_agent_generator(
+        self, template_path: str, raw_paths: List[str], output_path: str, rag_context: str = "", session_id: str = None
+    ) -> Generator[Dict[str, Any], None, None]:
+        return self.run_multi_agent_pipeline(template_path, raw_paths, output_path, rag_context, session_id)
