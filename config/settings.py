@@ -13,6 +13,7 @@ LLM_MODEL = os.getenv("LLM_MODEL", "Llama-3.3-70B-Instruct")
 VISION_MODEL = os.getenv("VISION_MODEL", "Qwen2.5-VL-7B-Instruct")
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "multilingual-e5-large")
 RERANKER_MODEL = os.getenv("RERANKER_MODEL", "bge-reranker-v2-m3")
+LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.3"))
 
 # 2. Directory Configurations (Windows compatible paths)
 DATA_DIR = BASE_DIR / "data"

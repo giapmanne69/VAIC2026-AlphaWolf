@@ -100,7 +100,7 @@ class AgenticReportAgent:
             response = self.client.chat.completions.create(
                 model=settings.LLM_MODEL,
                 messages=messages,
-                temperature=0.1,
+                temperature=settings.LLM_TEMPERATURE,
                 **extra_args
             )
             content = response.choices[0].message.content
